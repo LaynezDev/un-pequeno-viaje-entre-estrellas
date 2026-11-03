@@ -12,6 +12,14 @@ import { WebGLFallback } from './scenes/WebGLFallback';
 import { ambientAudio } from './audio/AmbientAudio';
 import { invitationConfig } from './config/invitationConfig';
 import { SceneStage } from './camera/ImmersiveCamera';
+import { NotFound404 } from './pages/NotFound404';
+import { DashboardPage } from './pages/DashboardPage';
+import {
+  FamilyGroup,
+  GlobalInvitationSettings,
+  InvitationRecord,
+  subscribeToInvitationByToken,
+} from './services/invitationService';
 
 const UniverseScene = lazy(() => import('./scenes/UniverseScene'));
 
@@ -27,7 +35,42 @@ function checkWebGLAvailable(): boolean {
   }
 }
 
+/**
+ * Resolves the current route:
+ * - `/mi_dashboard` -> Dashboard protected by Firebase PIN
+ * - `/?t=TOKEN`, `/?token=TOKEN`, `/i/TOKEN` -> Guest Invitation by Token
+ * - `/` (root without token) -> 404 Not Found
+ */
+function resolveRouteFromLocation(): {
+  type: 'dashboard' | 'invitation' | 'not-found';
+  token?: string;
+} {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  const params = new URLSearchParams(window.location.search);
+
+  if (path === '/mi_dashboard') {
+    return { type: 'dashboard' };
+  }
+
+  const queryToken = params.get('t') || params.get('token');
+  if (queryToken && queryToken.trim()) {
+    return { type: 'invitation', token: queryToken.trim() };
+  }
+
+  if (path.startsWith('/i/') || path.startsWith('/invitacion/')) {
+    const parts = path.split('/').filter(Boolean);
+    const pathToken = parts[1];
+    if (pathToken) {
+      return { type: 'invitation', token: decodeURIComponent(pathToken) };
+    }
+  }
+
+  // Root `/` without token or any unknown path -> 404 screen
+  return { type: 'not-found' };
+}
+
 export const App: React.FC = () => {
+  const [route] = useState(resolveRouteFromLocation);
   const [webglSupported, setWebglSupported] = useState(true);
   const [stage, setStage] = useState<SceneStage>('universe');
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -35,6 +78,21 @@ export const App: React.FC = () => {
   const [paused, setPaused] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [parallaxOffset, setParallaxOffset] = useState({ x: 0, y: 0 });
+
+  // Invitation Token State from Firebase / Service
+  const [loadingToken, setLoadingToken] = useState(
+    route.type === 'invitation'
+  );
+  const [invitation, setInvitation] = useState<InvitationRecord | null>(null);
+  const [familyInvitations, setFamilyInvitations] = useState<
+    InvitationRecord[]
+  >([]);
+  const [familyGroup, setFamilyGroup] = useState<FamilyGroup | null>(null);
+  const [settings, setSettings] = useState<GlobalInvitationSettings>({
+    dashboardPin: '2026',
+    rsvpDeadline: '2026-11-25T23:59',
+    updatedAt: '',
+  });
 
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -51,7 +109,25 @@ export const App: React.FC = () => {
     return () => mediaQuery.removeEventListener('change', handleMotionChange);
   }, []);
 
-  // Desktop mouse / mobile touch parallax
+  // Subscribe to invitation token if on an invitation route
+  useEffect(() => {
+    if (route.type !== 'invitation' || !route.token) {
+      setLoadingToken(false);
+      return;
+    }
+
+    setLoadingToken(true);
+    const unsub = subscribeToInvitationByToken(route.token, (data) => {
+      setInvitation(data.invitation);
+      setFamilyInvitations(data.familyInvitations);
+      setFamilyGroup(data.familyGroup);
+      setSettings(data.settings);
+      setLoadingToken(data.loading);
+    });
+
+    return () => unsub();
+  }, [route]);
+
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (prefersReducedMotion || paused) return;
@@ -97,7 +173,6 @@ export const App: React.FC = () => {
     setPaused((prev) => !prev);
   }, []);
 
-  // Advance through Universe -> Planet 1 -> Planet 2 -> Planet 3 -> Planet 4 -> Planet 5 (El Destino)
   const handleNextStage = useCallback(() => {
     if (isTransitioning) return;
     ambientAudio.playChime();
@@ -116,7 +191,6 @@ export const App: React.FC = () => {
     }
   }, [stage, isTransitioning]);
 
-  // Step backward through the journey
   const handlePrevStage = useCallback(() => {
     if (isTransitioning) return;
     ambientAudio.playChime();
@@ -145,8 +219,8 @@ export const App: React.FC = () => {
     [stage, isTransitioning]
   );
 
-  // Keyboard navigation for desktop users
   useEffect(() => {
+    if (route.type !== 'invitation') return;
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
@@ -158,7 +232,7 @@ export const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleNextStage, handlePrevStage]);
+  }, [route.type, handleNextStage, handlePrevStage]);
 
   const handleTransitionStart = useCallback(() => {
     setIsTransitioning(true);
@@ -170,6 +244,31 @@ export const App: React.FC = () => {
       ambientAudio.playLandingChime();
     }
   }, []);
+
+  // 1. Route: /mi_dashboard
+  if (route.type === 'dashboard') {
+    return <DashboardPage />;
+  }
+
+  // 2. Route: Root `/` without token -> 404 screen
+  if (route.type === 'not-found') {
+    return <NotFound404 />;
+  }
+
+  // 3. Loading token from Firebase
+  if (loadingToken) {
+    return (
+      <div className="storybook-loader" role="status">
+        <div className="loader-star">✦</div>
+        <p>Verificando tu invitación estelar...</p>
+      </div>
+    );
+  }
+
+  // 4. Invalid / non-existent token -> 404 screen
+  if (!invitation) {
+    return <NotFound404 />;
+  }
 
   if (!webglSupported) {
     return <WebGLFallback />;
@@ -185,7 +284,6 @@ export const App: React.FC = () => {
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {/* Subtle Paper Grain Overlay for Authentic Illustrated Storybook Feel */}
       <div className="paper-texture-overlay" aria-hidden="true" />
 
       <Suspense
@@ -231,6 +329,10 @@ export const App: React.FC = () => {
         onNextStage={handleNextStage}
         onPrevStage={handlePrevStage}
         onSelectStage={handleSelectStage}
+        invitation={invitation}
+        familyInvitations={familyInvitations}
+        familyGroup={familyGroup}
+        settings={settings}
       />
     </main>
   );

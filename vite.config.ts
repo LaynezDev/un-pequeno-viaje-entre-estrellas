@@ -10,6 +10,7 @@ export default defineConfig({
         manualChunks: {
           'three-core': ['three'],
           'r3f-ecosystem': ['@react-three/fiber', '@react-three/drei'],
+          'firebase-sdk': ['firebase/app', 'firebase/firestore'],
           gsap: ['gsap'],
           'react-vendor': ['react', 'react-dom', 'lucide-react'],
         },

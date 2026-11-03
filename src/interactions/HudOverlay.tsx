@@ -13,15 +13,28 @@ import {
   MapPin,
   Church,
   PartyPopper,
-  MessageCircleHeart,
   RotateCcw,
   Eye,
+  Check,
+  X,
+  Users,
+  UserPlus,
+  Lock,
 } from 'lucide-react';
 import { invitationConfig } from '../config/invitationConfig';
 import {
   SceneStage,
   getPlanetIndexForStage,
 } from '../camera/ImmersiveCamera';
+import {
+  AttendanceStatus,
+  FamilyGroup,
+  GlobalInvitationSettings,
+  InvitationMember,
+  InvitationRecord,
+  isModificationAllowed,
+  submitGuestRsvp,
+} from '../services/invitationService';
 
 interface HudOverlayProps {
   stage: SceneStage;
@@ -33,6 +46,10 @@ interface HudOverlayProps {
   onNextStage: () => void;
   onPrevStage: () => void;
   onSelectStage: (targetStage: SceneStage) => void;
+  invitation: InvitationRecord;
+  familyInvitations: InvitationRecord[];
+  familyGroup: FamilyGroup | null;
+  settings: GlobalInvitationSettings;
 }
 
 const STAGE_BY_PLANET_INDEX: SceneStage[] = [
@@ -53,23 +70,120 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   onNextStage,
   onPrevStage,
   onSelectStage,
+  invitation,
+  familyInvitations,
+  familyGroup,
+  settings,
 }) => {
   const [showLegend, setShowLegend] = useState(false);
   const [invitationDetailsExpanded, setInvitationDetailsExpanded] =
     useState(false);
-  const [guestName, setGuestName] = useState('');
-  const [guestCount, setGuestCount] = useState('2 personas');
+
+  // Local editable RSVP state initialized from the guest's InvitationRecord
+  const [draftMembers, setDraftMembers] = useState<InvitationMember[]>(
+    invitation.members
+  );
+  const [draftPlusCount, setDraftPlusCount] = useState<number>(
+    invitation.selectedPlusOnesCount
+  );
+  const [draftPlusNames, setDraftPlusNames] = useState<string[]>(
+    invitation.plusOneNames
+  );
+  const [draftNotes, setDraftNotes] = useState<string>(invitation.notes ?? '');
+  const [savingRsvp, setSavingRsvp] = useState(false);
+  const [rsvpError, setRsvpError] = useState('');
+  const [rsvpSuccess, setRsvpSuccess] = useState('');
+
+  useEffect(() => {
+    setDraftMembers(invitation.members);
+    setDraftPlusCount(invitation.selectedPlusOnesCount);
+    setDraftPlusNames(
+      Array.from(
+        { length: invitation.maxPlusOnes },
+        (_, i) => invitation.plusOneNames[i] ?? ''
+      )
+    );
+    setDraftNotes(invitation.notes ?? '');
+  }, [invitation]);
 
   const activePlanetIdx = getPlanetIndexForStage(stage);
   const activePlanet =
     invitationConfig.planets[activePlanetIdx] ?? invitationConfig.planets[0];
 
-  // Reset expanded invitation card whenever leaving Scene 05
   useEffect(() => {
     if (stage !== 'planet-5') {
       setInvitationDetailsExpanded(false);
     }
   }, [stage]);
+
+  const canModify = isModificationAllowed(settings.rsvpDeadline);
+  const anyMemberAttending = draftMembers.some((m) => m.status === 'attending');
+
+  const handleSetMemberStatus = (
+    memberId: string,
+    status: AttendanceStatus
+  ) => {
+    if (!canModify) return;
+    setRsvpError('');
+    setRsvpSuccess('');
+    setDraftMembers((prev) =>
+      prev.map((m) => (m.id === memberId ? { ...m, status } : m))
+    );
+  };
+
+  const handlePlusCountChange = (count: number) => {
+    if (!canModify) return;
+    setRsvpError('');
+    setRsvpSuccess('');
+    setDraftPlusCount(count);
+  };
+
+  const handlePlusNameChange = (idx: number, value: string) => {
+    if (!canModify) return;
+    setRsvpError('');
+    setRsvpSuccess('');
+    setDraftPlusNames((prev) => {
+      const next = [...prev];
+      next[idx] = value;
+      return next;
+    });
+  };
+
+  const handleSaveRsvp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRsvpError('');
+    setRsvpSuccess('');
+
+    // Ensure every titular member has chosen Sí asiste or No asiste
+    const hasPending = draftMembers.some((m) => m.status === 'pending');
+    if (hasPending) {
+      setRsvpError(
+        'Por favor selecciona "Sí asiste" o "No asiste" para cada persona.'
+      );
+      return;
+    }
+
+    setSavingRsvp(true);
+    try {
+      await submitGuestRsvp(invitation.id, {
+        members: draftMembers,
+        selectedPlusOnesCount: anyMemberAttending ? draftPlusCount : 0,
+        plusOneNames: draftPlusNames,
+        notes: draftNotes,
+      });
+      setRsvpSuccess(
+        '¡Tu confirmación ha sido guardada! Puedes modificarla hasta la fecha límite.'
+      );
+    } catch (err) {
+      setRsvpError(
+        err instanceof Error
+          ? err.message
+          : 'Error al guardar la confirmación.'
+      );
+    } finally {
+      setSavingRsvp(false);
+    }
+  };
 
   const sceneLabel =
     stage === 'universe'
@@ -87,15 +201,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         ? 'Llegando al Mundo de la Celebración de Christopher Gabriel...'
         : `Viajando hacia ${activePlanet.name}...`;
 
-  const buildWhatsAppRsvpUrl = () => {
-    const { rsvpPhone, rsvpMessage } = invitationConfig.eventDetails;
-    const extraInfo = guestName.trim()
-      ? `\nInvitado: ${guestName.trim()} (${guestCount})`
-      : `\nAsistentes confirmados: ${guestCount}`;
-    const fullText = encodeURIComponent(`${rsvpMessage}${extraInfo}`);
-    return `https://wa.me/${rsvpPhone}?text=${fullText}`;
-  };
-
   return (
     <div className="hud-root">
       {/* Decorative Shadow Box Paper Frame Vignette */}
@@ -106,14 +211,16 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         aria-hidden="true"
       />
 
-      {/* Top Bar: Title + Audio & Motion Controls */}
+      {/* Top Bar: Title + Guest Badge + Audio & Motion Controls */}
       <header className="hud-header">
         <div className="hud-brand">
           <span className="hud-phase-pill">
             <Sparkles size={13} />
-            <span>{sceneLabel}</span>
+            <span>Para: {invitation.displayTitle}</span>
           </span>
-          <h1 className="hud-project-title">{invitationConfig.projectTitle}</h1>
+          <h1 className="hud-project-title">
+            {invitationConfig.projectTitle} • <small>{sceneLabel}</small>
+          </h1>
         </div>
 
         <div className="hud-controls">
@@ -163,7 +270,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
       {/* Interactive Planet Legend Overlay */}
       {showLegend && (
-        <aside className="hud-planet-legend">
+        <aside
+          className="hud-planet-legend"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <div className="legend-title">Mundos en este Universo</div>
           <ul>
             {invitationConfig.planets.map((p, idx) => {
@@ -203,7 +313,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           className="finale-sky-protagonist-reveal"
           aria-live="polite"
         >
-          <span className="finale-star-crown">✦ El Destino de Nuestro Viaje ✦</span>
+          <span className="finale-star-crown">
+            ✦ Invitación especial para {invitation.displayTitle} ✦
+          </span>
           <h2 className="finale-protagonist-name">
             {invitationConfig.protagonistName}
           </h2>
@@ -227,6 +339,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
       >
         {stage === 'universe' ? (
           <div className="storybook-card">
+            <span className="guest-welcome-tag">
+              Bienvenidos • {invitation.displayTitle}
+            </span>
             <p className="storybook-quote">
               “{invitationConfig.openingQuote}”
             </p>
@@ -336,7 +451,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 onClick={() => setInvitationDetailsExpanded(true)}
               >
                 <Sparkles size={16} />
-                <span>Ver detalles de la invitación</span>
+                <span>Ver invitación y confirmar asistencia</span>
               </button>
             </div>
 
@@ -346,12 +461,12 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             </span>
           </div>
         ) : (
-          /* ESCENA 05 — MOMENTO 2: LIBRO DE INVITACIÓN PROGRESIVO (BAUTIZO, RECEPCIÓN, MAPS Y RSVP) */
+          /* ESCENA 05 — MOMENTO 2: LIBRO DE INVITACIÓN PROGRESIVO + CONFIRMACIÓN INDIVIDUAL Y FAMILIAR */
           <div className="storybook-invitation-sheet">
             <div className="invitation-sheet-header">
               <div>
                 <span className="sheet-kicker">
-                  {invitationConfig.eventTitle}
+                  Invitación para: <strong>{invitation.displayTitle}</strong>
                 </span>
                 <h3 className="sheet-protagonist">
                   {invitationConfig.protagonistName}
@@ -377,7 +492,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
             {/* Staggered Section 2: Baptism & Reception Grid */}
             <div className="invitation-events-grid">
-              {/* Ceremonia de Bautizo */}
               <article className="event-detail-box stagger-item-2">
                 <div className="event-box-title">
                   <Church size={16} />
@@ -404,7 +518,6 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 </a>
               </article>
 
-              {/* Recepción y Primer Cumpleaños */}
               <article className="event-detail-box stagger-item-3">
                 <div className="event-box-title">
                   <PartyPopper size={16} />
@@ -432,29 +545,142 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               </article>
             </div>
 
-            {/* Staggered Section 3: RSVP Confirmation via WhatsApp */}
-            <div className="invitation-rsvp-box stagger-item-4">
-              <div className="rsvp-inputs-row">
-                <input
-                  type="text"
-                  className="rsvp-name-input"
-                  placeholder="Tu nombre o familia (opcional)"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                />
-                <select
-                  className="rsvp-count-select"
-                  value={guestCount}
-                  onChange={(e) => setGuestCount(e.target.value)}
-                  aria-label="Número de asistentes"
-                >
-                  <option value="1 persona">1 persona</option>
-                  <option value="2 personas">2 personas</option>
-                  <option value="3 personas">3 personas</option>
-                  <option value="4 personas">4 personas</option>
-                  <option value="Familia completa">Familia completa</option>
-                </select>
+            {/* Staggered Section 3: Individual Member RSVP & Plus-Ones (+1/+2/+3) */}
+            <form
+              onSubmit={handleSaveRsvp}
+              className="invitation-rsvp-box stagger-item-4"
+            >
+              <div className="rsvp-section-header">
+                <h4>
+                  Confirmación de Asistencia • {invitation.displayTitle}
+                </h4>
+                <span className="deadline-pill">
+                  {canModify ? (
+                    <>
+                      Modificable hasta:{' '}
+                      <strong>
+                        {settings.rsvpDeadline.replace('T', ' ')}
+                      </strong>
+                    </>
+                  ) : (
+                    <>
+                      <Lock size={12} /> Fecha límite de cambios concluida
+                    </>
+                  )}
+                </span>
               </div>
+
+              {/* List of individual members in this invitation (e.g. Juan & María in Esposos Picapiedra) */}
+              <div className="rsvp-members-checklist">
+                {draftMembers.map((member) => (
+                  <div key={member.id} className="rsvp-member-row">
+                    <span className="rsvp-member-name">{member.name}</span>
+
+                    <div className="rsvp-member-toggle-group">
+                      <button
+                        type="button"
+                        disabled={!canModify}
+                        className={`btn-attendance-choice is-yes ${
+                          member.status === 'attending' ? 'is-selected' : ''
+                        }`}
+                        onClick={() =>
+                          handleSetMemberStatus(member.id, 'attending')
+                        }
+                      >
+                        <Check size={14} />
+                        <span>Sí asiste</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={!canModify}
+                        className={`btn-attendance-choice is-no ${
+                          member.status === 'declined' ? 'is-selected' : ''
+                        }`}
+                        onClick={() =>
+                          handleSetMemberStatus(member.id, 'declined')
+                        }
+                      >
+                        <X size={14} />
+                        <span>No asiste</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Plus-Ones (+1 / +2 / +3) Section: ONLY shown if maxPlusOnes > 0 AND at least one member attends */}
+              {invitation.maxPlusOnes > 0 && anyMemberAttending && (
+                <div className="rsvp-plusones-block">
+                  <div className="plusones-selector-row">
+                    <label>
+                      <UserPlus size={15} />
+                      <span>
+                        Acompañantes adicionales (hasta +{invitation.maxPlusOnes}
+                        ):
+                      </span>
+                    </label>
+                    <select
+                      disabled={!canModify}
+                      value={draftPlusCount}
+                      onChange={(e) =>
+                        handlePlusCountChange(Number(e.target.value))
+                      }
+                      className="rsvp-count-select"
+                    >
+                      <option value={0}>Sin acompañantes adicionales (0)</option>
+                      {Array.from(
+                        { length: invitation.maxPlusOnes },
+                        (_, idx) => idx + 1
+                      ).map((num) => (
+                        <option key={num} value={num}>
+                          +{num}{' '}
+                          {num === 1 ? 'acompañante' : 'acompañantes'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {draftPlusCount > 0 && (
+                    <div className="plusones-names-grid">
+                      {Array.from(
+                        { length: draftPlusCount },
+                        (_, idx) => idx
+                      ).map((idx) => (
+                        <input
+                          key={idx}
+                          type="text"
+                          disabled={!canModify}
+                          className="rsvp-name-input"
+                          placeholder={`Nombre completo del acompañante #${
+                            idx + 1
+                          } (obligatorio)`}
+                          value={draftPlusNames[idx] ?? ''}
+                          onChange={(e) =>
+                            handlePlusNameChange(idx, e.target.value)
+                          }
+                          required
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Optional congratulations note */}
+              <input
+                type="text"
+                disabled={!canModify}
+                className="rsvp-name-input"
+                placeholder="Mensaje o felicitación para Christopher Gabriel (opcional)"
+                value={draftNotes}
+                onChange={(e) => setDraftNotes(e.target.value)}
+              />
+
+              {rsvpError && <p className="rsvp-alert is-error">{rsvpError}</p>}
+              {rsvpSuccess && (
+                <p className="rsvp-alert is-success">{rsvpSuccess}</p>
+              )}
 
               <div className="rsvp-buttons-row">
                 <button
@@ -466,17 +692,83 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                   <span>Reiniciar viaje</span>
                 </button>
 
-                <a
-                  href={buildWhatsAppRsvpUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-whatsapp-rsvp"
-                >
-                  <MessageCircleHeart size={17} />
-                  <span>Confirmar asistencia</span>
-                </a>
+                {canModify && (
+                  <button
+                    type="submit"
+                    className="btn-whatsapp-rsvp"
+                    disabled={savingRsvp}
+                  >
+                    <Check size={17} />
+                    <span>
+                      {savingRsvp
+                        ? 'Guardando...'
+                        : invitation.respondedAt
+                          ? 'Actualizar confirmación'
+                          : 'Guardar confirmación'}
+                    </span>
+                  </button>
+                )}
               </div>
-            </div>
+            </form>
+
+            {/* Staggered Section 4: FAMILY GROUP STATUS (Visible ONLY if invitation belongs to a familyGroupId) */}
+            {invitation.familyGroupId && familyInvitations.length > 1 && (
+              <section className="family-visibility-box stagger-item-4">
+                <div className="family-box-header">
+                  <Users size={16} />
+                  <h4>
+                    Confirmaciones en tu familia
+                    {familyGroup ? ` (${familyGroup.name})` : ''}
+                  </h4>
+                </div>
+                <p className="family-box-sub">
+                  Aquí puedes ver quiénes de tu familia ya confirmaron su
+                  asistencia:
+                </p>
+
+                <div className="family-siblings-grid">
+                  {familyInvitations.map((sib) => (
+                    <div
+                      key={sib.id}
+                      className={`family-sibling-card ${
+                        sib.id === invitation.id ? 'is-own-card' : ''
+                      }`}
+                    >
+                      <div className="sibling-card-title">
+                        <strong>{sib.displayTitle}</strong>
+                        {sib.id === invitation.id && (
+                          <span className="own-tag">Tu invitación</span>
+                        )}
+                      </div>
+
+                      <ul className="sibling-members-list">
+                        {sib.members.map((m) => (
+                          <li key={m.id}>
+                            <span>{m.name}</span>
+                            <span className={`status-tag is-${m.status}`}>
+                              {m.status === 'attending'
+                                ? '✓ Asiste'
+                                : m.status === 'declined'
+                                  ? '✕ No asiste'
+                                  : '⏳ Pendiente'}
+                            </span>
+                          </li>
+                        ))}
+                        {sib.selectedPlusOnesCount > 0 &&
+                          sib.plusOneNames.map((pName, idx) => (
+                            <li key={`plus-${idx}`} className="is-plus-guest">
+                              <span>+ {pName} (Acompañante)</span>
+                              <span className="status-tag is-attending">
+                                ✓ Asiste
+                              </span>
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
       </footer>
