@@ -222,6 +222,8 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
       {/* Bottom Narrative Storybook Card — Fades out smoothly during camera flight */}
       <footer
         className={`hud-footer ${isTransitioning ? 'is-hidden-during-flight' : ''}`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerMove={(e) => e.stopPropagation()}
       >
         {stage === 'universe' ? (
           <div className="storybook-card">

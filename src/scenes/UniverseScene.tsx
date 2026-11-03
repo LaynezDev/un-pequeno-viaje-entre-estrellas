@@ -14,12 +14,21 @@ import {
 } from '../camera/ImmersiveCamera';
 import { LittlePrinceAndFox } from '../characters/LittlePrinceAndFox';
 
+const STAGE_BY_INDEX: SceneStage[] = [
+  'planet-1',
+  'planet-2',
+  'planet-3',
+  'planet-4',
+  'planet-5',
+];
+
 interface UniverseSceneProps {
   stage: SceneStage;
   reducedMotion?: boolean;
   parallaxOffset: { x: number; y: number };
   onTransitionStart?: () => void;
   onTransitionComplete?: (arrivedStage: SceneStage) => void;
+  onSelectStage?: (targetStage: SceneStage) => void;
 }
 
 export const UniverseScene: React.FC<UniverseSceneProps> = ({
@@ -28,6 +37,7 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
   parallaxOffset,
   onTransitionStart,
   onTransitionComplete,
+  onSelectStage,
 }) => {
   const initialCharPos = getCharacterPlanetTransform(
     invitationConfig.planets[0]
@@ -77,7 +87,7 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
       <color attach="background" args={['#1a2744']} />
       <fog attach="fog" args={['#1a2744', 18, 42]} />
 
-      {/* Camera Controller for FASE 1 to FASE 5 */}
+      {/* Camera Controller for FASE 1 to FASE 6 */}
       <ImmersiveCamera
         stage={stage}
         reducedMotion={reducedMotion}
@@ -87,7 +97,7 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
         onTransitionComplete={onTransitionComplete}
       />
 
-      {/* Storybook Shadow Box Lighting (gradually shifts to warm gold in Scene 05) */}
+      {/* Storybook Shadow Box Lighting */}
       <ambientLight ref={ambientLightRef} intensity={0.85} color="#f5ebd6" />
       <hemisphereLight
         color="#fff3d6"
@@ -100,7 +110,7 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
         intensity={1.35}
         color="#ffe8b8"
         castShadow
-        shadow-mapSize={[1024, 1024]}
+        shadow-mapSize={[512, 512]}
         shadow-bias={-0.0005}
       />
       <directionalLight
@@ -112,7 +122,7 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
       {/* Multi-layered Shadow Box Environment */}
       <ShadowBoxEnvironment reducedMotion={reducedMotion} />
 
-      {/* El Principito y su Zorro (Continuous 3D actors that leap between all 5 planets) */}
+      {/* El Principito y su Zorro */}
       <LittlePrinceAndFox
         currentPlanetIndex={currentPlanetIndex}
         reducedMotion={reducedMotion}
@@ -128,9 +138,15 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
             config={planet}
             reducedMotion={reducedMotion}
             isFocused={stage !== 'universe' && idx === currentPlanetIndex}
+            onSelect={() => {
+              const target = STAGE_BY_INDEX[idx];
+              if (target) onSelectStage?.(target);
+            }}
           />
         ))}
       </group>
     </>
   );
 };
+
+export default UniverseScene;

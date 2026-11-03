@@ -8,6 +8,7 @@ interface PlanetProps {
   config: PlanetConfig;
   reducedMotion?: boolean;
   isFocused?: boolean;
+  onSelect?: () => void;
 }
 
 /**
@@ -91,6 +92,7 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
   config,
   reducedMotion = false,
   isFocused = false,
+  onSelect,
 }) => {
   const rootGroupRef = useRef<THREE.Group>(null);
   const dioramaOrbitRef = useRef<THREE.Group>(null);
@@ -267,6 +269,10 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
       ref={rootGroupRef}
       position={config.position}
       scale={config.scale}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect?.();
+      }}
     >
       {/* 1. MAIN WATERCOLOR PLANET CORE + LAYERED PAPER BANDS */}
       <mesh castShadow receiveShadow>

@@ -1,11 +1,19 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  Suspense,
+  lazy,
+} from 'react';
 import { Canvas } from '@react-three/fiber';
-import { UniverseScene } from './scenes/UniverseScene';
 import { HudOverlay } from './interactions/HudOverlay';
 import { WebGLFallback } from './scenes/WebGLFallback';
 import { ambientAudio } from './audio/AmbientAudio';
 import { invitationConfig } from './config/invitationConfig';
 import { SceneStage } from './camera/ImmersiveCamera';
+
+const UniverseScene = lazy(() => import('./scenes/UniverseScene'));
 
 function checkWebGLAvailable(): boolean {
   try {
@@ -137,6 +145,21 @@ export const App: React.FC = () => {
     [stage, isTransitioning]
   );
 
+  // Keyboard navigation for desktop users
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight') {
+        handleNextStage();
+      } else if (e.key === 'ArrowLeft') {
+        handlePrevStage();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleNextStage, handlePrevStage]);
+
   const handleTransitionStart = useCallback(() => {
     setIsTransitioning(true);
   }, []);
@@ -165,24 +188,38 @@ export const App: React.FC = () => {
       {/* Subtle Paper Grain Overlay for Authentic Illustrated Storybook Feel */}
       <div className="paper-texture-overlay" aria-hidden="true" />
 
-      <Canvas
-        shadows
-        dpr={[1, 2]}
-        camera={{
-          position: invitationConfig.universeCamera.initialPosition,
-          fov: invitationConfig.universeCamera.fov,
-          near: 0.1,
-          far: 100,
-        }}
+      <Suspense
+        fallback={
+          <div className="storybook-loader" role="status">
+            <div className="loader-star">✦</div>
+            <p>Abriendo nuestro pequeño universo...</p>
+          </div>
+        }
       >
-        <UniverseScene
-          stage={stage}
-          reducedMotion={reducedMotion}
-          parallaxOffset={parallaxOffset}
-          onTransitionStart={handleTransitionStart}
-          onTransitionComplete={handleTransitionComplete}
-        />
-      </Canvas>
+        <Canvas
+          shadows
+          dpr={[1, 1.75]}
+          gl={{
+            antialias: true,
+            powerPreference: 'high-performance',
+          }}
+          camera={{
+            position: invitationConfig.universeCamera.initialPosition,
+            fov: invitationConfig.universeCamera.fov,
+            near: 0.1,
+            far: 100,
+          }}
+        >
+          <UniverseScene
+            stage={stage}
+            reducedMotion={reducedMotion}
+            parallaxOffset={parallaxOffset}
+            onTransitionStart={handleTransitionStart}
+            onTransitionComplete={handleTransitionComplete}
+            onSelectStage={handleSelectStage}
+          />
+        </Canvas>
+      </Suspense>
 
       <HudOverlay
         stage={stage}

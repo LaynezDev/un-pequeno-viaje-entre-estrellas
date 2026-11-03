@@ -495,6 +495,8 @@ body,
 /* ==================== ESCENA 05: FULL PROGRESSIVE INVITATION SHEET ==================== */
 .storybook-invitation-sheet {
   pointer-events: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   max-width: 660px;
   width: 100%;
   max-height: 76dvh;
@@ -723,6 +725,29 @@ body,
 .stagger-item-4 {
   opacity: 0;
   animation: revealStagger 0.45s ease forwards 0.46s;
+}
+
+/* Progressive Loader */
+.storybook-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: radial-gradient(circle at center, #213459 0%, #152039 100%);
+  color: var(--paper-cream);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 1.25rem;
+}
+
+.loader-star {
+  font-size: 2.2rem;
+  color: var(--gold-soft);
+  animation: pulseFlight 1.5s infinite ease-in-out;
 }
 
 /* Fallback */
