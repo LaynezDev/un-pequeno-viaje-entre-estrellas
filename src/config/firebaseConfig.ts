@@ -10,13 +10,50 @@ export interface FirebaseCredentials {
   appId?: string;
 }
 
+declare global {
+  interface Window {
+    __FIREBASE_WEBAPP_CONFIG__?: FirebaseCredentials;
+  }
+  const __BUILD_FIREBASE_WEBAPP_CONFIG__: string;
+}
+
 const LOCAL_FIREBASE_CONFIG_KEY = 'cg_firebase_RuntimeConfig_v1';
 
 /**
- * Reads Firebase credentials from Vite environment variables (.env)
- * or from runtime configuration saved in /mi_dashboard.
+ * Reads Firebase credentials in priority order:
+ * 1. Firebase App Hosting runtime injection (window.__FIREBASE_WEBAPP_CONFIG__)
+ * 2. Firebase App Hosting build-time injection (process.env.FIREBASE_WEBAPP_CONFIG)
+ * 3. Vite .env variables (VITE_FIREBASE_*)
+ * 4. Runtime credentials saved in /mi_dashboard
  */
 export function getFirebaseCredentials(): FirebaseCredentials | null {
+  // 1. Runtime injection from server.mjs on Firebase App Hosting / Cloud Run
+  if (
+    typeof window !== 'undefined' &&
+    window.__FIREBASE_WEBAPP_CONFIG__?.apiKey &&
+    window.__FIREBASE_WEBAPP_CONFIG__?.projectId
+  ) {
+    return window.__FIREBASE_WEBAPP_CONFIG__;
+  }
+
+  // 2. Build-time injection from FIREBASE_WEBAPP_CONFIG
+  try {
+    if (
+      typeof __BUILD_FIREBASE_WEBAPP_CONFIG__ === 'string' &&
+      __BUILD_FIREBASE_WEBAPP_CONFIG__.trim().startsWith('{')
+    ) {
+      const parsed = JSON.parse(
+        __BUILD_FIREBASE_WEBAPP_CONFIG__
+      ) as FirebaseCredentials;
+      if (parsed.apiKey && parsed.projectId) {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Vite .env variables
   const envApiKey = import.meta.env.VITE_FIREBASE_API_KEY;
   const envProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
 
@@ -36,6 +73,7 @@ export function getFirebaseCredentials(): FirebaseCredentials | null {
     };
   }
 
+  // 4. LocalStorage saved from /mi_dashboard
   try {
     const raw = localStorage.getItem(LOCAL_FIREBASE_CONFIG_KEY);
     if (raw) {

@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __BUILD_FIREBASE_WEBAPP_CONFIG__: JSON.stringify(
+      process.env.FIREBASE_WEBAPP_CONFIG || ''
+    ),
+  },
   build: {
     chunkSizeWarningLimit: 800,
     rollupOptions: {
