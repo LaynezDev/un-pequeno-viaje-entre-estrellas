@@ -1,12 +1,17 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const buildFirebaseWebappConfig =
+  (
+    globalThis as {
+      process?: { env?: Record<string, string | undefined> };
+    }
+  ).process?.env?.FIREBASE_WEBAPP_CONFIG || '';
+
 export default defineConfig({
   plugins: [react()],
   define: {
-    __BUILD_FIREBASE_WEBAPP_CONFIG__: JSON.stringify(
-      process.env.FIREBASE_WEBAPP_CONFIG || ''
-    ),
+    __BUILD_FIREBASE_WEBAPP_CONFIG__: JSON.stringify(buildFirebaseWebappConfig),
   },
   build: {
     chunkSizeWarningLimit: 800,
