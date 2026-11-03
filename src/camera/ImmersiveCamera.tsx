@@ -9,7 +9,8 @@ export type SceneStage =
   | 'planet-1'
   | 'planet-2'
   | 'planet-3'
-  | 'planet-4';
+  | 'planet-4'
+  | 'planet-5';
 
 export function getPlanetIndexForStage(stage: SceneStage): number {
   switch (stage) {
@@ -21,6 +22,8 @@ export function getPlanetIndexForStage(stage: SceneStage): number {
       return 2;
     case 'planet-4':
       return 3;
+    case 'planet-5':
+      return 4;
     default:
       return 0;
   }
@@ -127,19 +130,29 @@ export const ImmersiveCamera: React.FC<ImmersiveCameraProps> = ({
 
     const isInterplanetaryJump =
       fromStage !== 'universe' && stage !== 'universe';
+    const isGrandFinaleArrival = stage === 'planet-5';
 
-    const duration = reducedMotion ? 1.5 : isInterplanetaryJump ? 4.35 : 4.1;
+    const duration = reducedMotion
+      ? 1.5
+      : isGrandFinaleArrival
+        ? 4.7
+        : isInterplanetaryJump
+          ? 4.35
+          : 4.1;
     onTransitionStart?.();
 
     if (isInterplanetaryJump && !reducedMotion) {
-      // Camera waits briefly during character crouch (0.32s), pulls back to show space depth & tracks the jump arc
+      // For Escena 05 (El Destino), the camera pulls back slightly further first to reveal the special golden planet
+      const pullBackZ = isGrandFinaleArrival ? 4.2 : 2.6;
+      const liftY = isGrandFinaleArrival ? 1.75 : 1.3;
+
       const tl = gsap.timeline();
       tl.to(
         flightArc.current,
         {
-          y: 1.3,
-          z: 2.6,
-          trackCharacterWeight: 0.8,
+          y: liftY,
+          z: pullBackZ,
+          trackCharacterWeight: 0.82,
           duration: duration * 0.48,
           ease: 'sine.out',
         },
@@ -258,7 +271,6 @@ export const ImmersiveCamera: React.FC<ImmersiveCameraProps> = ({
       baseTarget.current.z
     );
 
-    // Real-time Camera Tracking of the Little Prince & Fox during their jump!
     if (liveCharacterPosRef && flightArc.current.trackCharacterWeight > 0.001) {
       const charTarget = liveCharacterPosRef.current.clone();
       charTarget.y += isPortrait ? -0.15 : 0.15;

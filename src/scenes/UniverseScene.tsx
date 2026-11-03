@@ -1,4 +1,5 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
   invitationConfig,
@@ -33,14 +34,50 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
   ).position;
   const liveCharacterPosRef = useRef(new THREE.Vector3(...initialCharPos));
 
+  const ambientLightRef = useRef<THREE.AmbientLight>(null);
+  const keyLightRef = useRef<THREE.DirectionalLight>(null);
+
+  const normalAmbientColor = useMemo(() => new THREE.Color('#f5ebd6'), []);
+  const goldenAmbientColor = useMemo(() => new THREE.Color('#ffe9b5'), []);
+  const normalKeyColor = useMemo(() => new THREE.Color('#ffe8b8'), []);
+  const goldenKeyColor = useMemo(() => new THREE.Color('#ffd97d'), []);
+
   const currentPlanetIndex = getPlanetIndexForStage(stage);
+  const isDestinationScene = stage === 'planet-5';
+
+  // Gradually shift scene lighting to warm golden tones on Escena 05 (El Destino)
+  useFrame((_, delta) => {
+    const damp = 1 - Math.exp(-2.2 * delta);
+    if (ambientLightRef.current) {
+      ambientLightRef.current.color.lerp(
+        isDestinationScene ? goldenAmbientColor : normalAmbientColor,
+        damp
+      );
+      ambientLightRef.current.intensity = THREE.MathUtils.lerp(
+        ambientLightRef.current.intensity,
+        isDestinationScene ? 1.05 : 0.85,
+        damp
+      );
+    }
+    if (keyLightRef.current) {
+      keyLightRef.current.color.lerp(
+        isDestinationScene ? goldenKeyColor : normalKeyColor,
+        damp
+      );
+      keyLightRef.current.intensity = THREE.MathUtils.lerp(
+        keyLightRef.current.intensity,
+        isDestinationScene ? 1.65 : 1.35,
+        damp
+      );
+    }
+  });
 
   return (
     <>
       <color attach="background" args={['#1a2744']} />
       <fog attach="fog" args={['#1a2744', 18, 42]} />
 
-      {/* Camera Controller for FASE 1, 2, 3 & 4 */}
+      {/* Camera Controller for FASE 1 to FASE 5 */}
       <ImmersiveCamera
         stage={stage}
         reducedMotion={reducedMotion}
@@ -50,14 +87,15 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
         onTransitionComplete={onTransitionComplete}
       />
 
-      {/* Storybook Shadow Box Lighting (Warm paper illumination + soft twilight fill) */}
-      <ambientLight intensity={0.85} color="#f5ebd6" />
+      {/* Storybook Shadow Box Lighting (gradually shifts to warm gold in Scene 05) */}
+      <ambientLight ref={ambientLightRef} intensity={0.85} color="#f5ebd6" />
       <hemisphereLight
         color="#fff3d6"
         groundColor="#2c3e66"
         intensity={0.75}
       />
       <directionalLight
+        ref={keyLightRef}
         position={[8, 14, 12]}
         intensity={1.35}
         color="#ffe8b8"
@@ -74,7 +112,7 @@ export const UniverseScene: React.FC<UniverseSceneProps> = ({
       {/* Multi-layered Shadow Box Environment */}
       <ShadowBoxEnvironment reducedMotion={reducedMotion} />
 
-      {/* El Principito y su Zorro (Continuous 3D actors that leap between all planets) */}
+      {/* El Principito y su Zorro (Continuous 3D actors that leap between all 5 planets) */}
       <LittlePrinceAndFox
         currentPlanetIndex={currentPlanetIndex}
         reducedMotion={reducedMotion}

@@ -100,6 +100,8 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
   const dreamMoonRef = useRef<THREE.Group>(null);
   const dreamPinwheelRef = useRef<THREE.Group>(null);
   const faithDoveRef = useRef<THREE.Group>(null);
+  const celebrationStarRef = useRef<THREE.Mesh>(null);
+  const celebrationLanternsRef = useRef<THREE.Group>(null);
 
   const primaryMat = useMemo(
     () =>
@@ -201,7 +203,7 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
     const phase = config.order * 1.7;
 
     if (rootGroupRef.current) {
-      const bobAmplitude = isFocused ? 0.018 : 0.085;
+      const bobAmplitude = isFocused ? 0.015 : 0.085;
       const targetY =
         config.position[1] + Math.sin(t * 0.65 + phase) * bobAmplitude;
       rootGroupRef.current.position.y = THREE.MathUtils.lerp(
@@ -210,7 +212,7 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
         1 - Math.exp(-4 * delta)
       );
       rootGroupRef.current.rotation.z =
-        Math.sin(t * 0.35 + phase) * (isFocused ? 0.01 : 0.025);
+        Math.sin(t * 0.35 + phase) * (isFocused ? 0.008 : 0.025);
     }
 
     if (dioramaOrbitRef.current) {
@@ -226,7 +228,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
       roseGlowRef.current.scale.setScalar(s);
     }
 
-    // Planet 2 (Amor): Gentle floating hearts animation
     if (floatingHeartsRef.current) {
       floatingHeartsRef.current.children.forEach((child, idx) => {
         child.position.y =
@@ -235,7 +236,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
       });
     }
 
-    // Planet 3 (Sueños): Gentle rocking moon mobile & spinning pinwheel
     if (dreamMoonRef.current) {
       dreamMoonRef.current.rotation.z = 0.22 + Math.sin(t * 1.1) * 0.08;
     }
@@ -243,10 +243,22 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
       dreamPinwheelRef.current.rotation.z = -t * 0.95;
     }
 
-    // Planet 4 (Fe): Gentle hovering dove above chapel
     if (faithDoveRef.current) {
       faithDoveRef.current.position.y = 1.98 + Math.sin(t * 1.8) * 0.05;
       faithDoveRef.current.rotation.y = Math.sin(t * 0.8) * 0.15;
+    }
+
+    // Planet 5 (Celebración): Guiding Star & Floating Golden Paper Lanterns
+    if (celebrationStarRef.current) {
+      celebrationStarRef.current.rotation.y = Math.sin(t * 0.9) * 0.25;
+      const pulse = 1.28 + Math.sin(t * 2.0) * 0.08;
+      celebrationStarRef.current.scale.setScalar(pulse);
+    }
+    if (celebrationLanternsRef.current) {
+      celebrationLanternsRef.current.children.forEach((lantern, idx) => {
+        lantern.position.y =
+          1.25 + (idx % 2) * 0.22 + Math.sin(t * 1.4 + idx * 1.3) * 0.07;
+      });
     }
   });
 
@@ -256,13 +268,13 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
       position={config.position}
       scale={config.scale}
     >
-      {/* 1. MAIN WATERCOLOR PLANET CORE + LAYERED PAPER BANDS (No flat white backing discs!) */}
+      {/* 1. MAIN WATERCOLOR PLANET CORE + LAYERED PAPER BANDS */}
       <mesh castShadow receiveShadow>
         <sphereGeometry args={[1.0, 32, 32]} />
         <meshStandardMaterial {...primaryMat} />
       </mesh>
 
-      {/* Overlapping cut-paper hill collar (Shadow Box depth layer on planet equator) */}
+      {/* Overlapping cut-paper hill collar */}
       <mesh
         position={[0, -0.14, 0.05]}
         rotation={[0.12, 0, -0.08]}
@@ -308,7 +320,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             distance={5.5}
           />
 
-          {/* BACKGROUND LAYER: Layered Paper Mountains / Tiny Volcanoes */}
           <group position={[-0.58, 0.72, -0.28]} rotation={[0, 0, 0.52]}>
             <mesh castShadow>
               <coneGeometry args={[0.26, 0.48, 16]} />
@@ -331,7 +342,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Tiny Storybook Cozy Home in Background Plane */}
           <group
             position={[-0.36, 0.88, -0.32]}
             rotation={[-0.16, 0.15, 0.28]}
@@ -368,7 +378,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </group>
           </group>
 
-          {/* MIDGROUND LAYER: The Iconic Rose + Stepping Stones */}
           <group position={[-0.54, 0.77, 0.36]} rotation={[0.18, 0.1, 0.4]}>
             <mesh position={[0, 0.14, 0]}>
               <cylinderGeometry args={[0.016, 0.018, 0.28, 8]} />
@@ -409,7 +418,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Tiny Paper Stepping Stones */}
           {[
             [-0.22, 0.96, 0.25],
             [-0.1, 0.98, 0.34],
@@ -426,7 +434,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           ))}
 
-          {/* FOREGROUND SHADOW-BOX CUTOUT LAYERS */}
           <mesh
             position={[0.02, 0.68, 0.72]}
             rotation={[0.55, 0, 0]}
@@ -482,7 +489,7 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
         </group>
       )}
 
-      {/* ==================== PLANETA 2: PLANETA DEL AMOR (LA FAMILIA Y LOS ABRAZOS) ==================== */}
+      {/* ==================== PLANETA 2: PLANETA DEL AMOR ==================== */}
       {config.id === 'planeta-amor' && (
         <group>
           <pointLight
@@ -492,7 +499,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             distance={5.5}
           />
 
-          {/* BACKGROUND LAYER: Warm Paper Archway of Family Embrace + Cozy Family Silhouettes */}
           <mesh
             position={[0, 0.94, -0.32]}
             rotation={[0, 0, 0]}
@@ -502,7 +508,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             <meshStandardMaterial {...accentMat} />
           </mesh>
 
-          {/* Two Loving Stylized Paper Silhouettes Embracing in the Background Garden */}
           <group position={[-0.28, 0.92, -0.28]} rotation={[0, 0.2, 0.14]}>
             <mesh position={[-0.06, 0.14, 0]} castShadow>
               <capsuleGeometry args={[0.055, 0.16, 8, 12]} />
@@ -526,7 +531,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* MIDGROUND LAYER: Cut-Paper Heart Trees & Garden Bench */}
           <group position={[-0.52, 0.8, 0.05]} rotation={[0, 0.18, 0.38]}>
             <mesh position={[0, 0.14, 0]}>
               <cylinderGeometry args={[0.025, 0.035, 0.28, 8]} />
@@ -559,7 +563,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Small Paper Garden Bench next to landing spot */}
           <group position={[-0.32, 0.88, 0.32]} rotation={[0.25, 0.3, 0.22]}>
             <mesh position={[0, 0.06, 0]} castShadow>
               <boxGeometry args={[0.22, 0.025, 0.09]} />
@@ -571,7 +574,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Floating Paper Hearts Rising Gently */}
           <group ref={floatingHeartsRef}>
             {[
               [-0.36, 1.25, 0.22],
@@ -592,7 +594,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             ))}
           </group>
 
-          {/* FOREGROUND PARALLAX LAYER: Layered Rose-Taupe Hill & Flowers */}
           <mesh
             position={[0.0, 0.68, 0.72]}
             rotation={[0.55, 0, 0]}
@@ -623,7 +624,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </group>
           ))}
 
-          {/* Orbiting Paper Ribbon Ring */}
           <mesh rotation={[Math.PI * 0.42, 0.2, 0]}>
             <torusGeometry args={[1.38, 0.032, 10, 48]} />
             <meshStandardMaterial {...accentMat} />
@@ -631,7 +631,7 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
         </group>
       )}
 
-      {/* ==================== PLANETA 3: PLANETA DE LOS SUEÑOS (PRIMER AÑO Y CURIOSIDAD) ==================== */}
+      {/* ==================== PLANETA 3: PLANETA DE LOS SUEÑOS ==================== */}
       {config.id === 'planeta-suenos' && (
         <group>
           <pointLight
@@ -641,7 +641,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             distance={5.5}
           />
 
-          {/* BACKGROUND LAYER: Giant Golden Crescent Moon Mobile & Hanging Star */}
           <group
             ref={dreamMoonRef}
             position={[-0.18, 1.15, -0.32]}
@@ -651,7 +650,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
               <torusGeometry args={[0.42, 0.095, 14, 28, Math.PI * 1.35]} />
               <meshStandardMaterial {...warmGoldMat} />
             </mesh>
-            {/* Hanging thread & star */}
             <mesh position={[0.26, -0.02, 0.02]}>
               <cylinderGeometry args={[0.006, 0.006, 0.22, 6]} />
               <meshBasicMaterial color="#fff3d1" />
@@ -665,8 +663,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* MIDGROUND LAYER: Storybook Toy Blocks (1st Year) & Origami Paper Boat */}
-          {/* Stacked Discovery Cubes on Left */}
           <group position={[-0.44, 0.85, 0.14]} rotation={[0.1, 0.25, 0.35]}>
             <mesh position={[0, 0.08, 0]} castShadow>
               <boxGeometry args={[0.16, 0.16, 0.16]} />
@@ -686,9 +682,7 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Little Paper Boat sailing on a cloud on Right */}
           <group position={[0.46, 0.84, 0.18]} rotation={[0.12, -0.2, -0.34]}>
-            {/* Boat Hull */}
             <mesh
               position={[0, 0.06, 0]}
               rotation={[0, 0, Math.PI]}
@@ -698,14 +692,12 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
               <coneGeometry args={[0.11, 0.14, 4]} />
               <meshStandardMaterial {...paperRimMat} />
             </mesh>
-            {/* Paper Sail */}
             <mesh position={[0, 0.16, 0]} scale={[1.0, 1.2, 0.2]} castShadow>
               <coneGeometry args={[0.1, 0.18, 3]} />
               <meshStandardMaterial {...warmGoldMat} />
             </mesh>
           </group>
 
-          {/* FOREGROUND PARALLAX LAYER: Spinning Paper Pinwheel & Layered Clouds */}
           <group position={[-0.28, 0.76, 0.62]} rotation={[0.38, 0, 0.18]}>
             <mesh position={[0, 0.12, 0]}>
               <cylinderGeometry args={[0.012, 0.012, 0.24, 8]} />
@@ -735,7 +727,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </group>
           </group>
 
-          {/* Soft Layered Clouds around the Equator */}
           {[0, 1, 2, 3].map((i) => {
             const angle = (i * Math.PI) / 2 + 0.4;
             return (
@@ -766,7 +757,7 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
         </group>
       )}
 
-      {/* ==================== PLANETA 4: PLANETA DE LA FE (EL BAUTIZO Y LA LUZ CÁLIDA) ==================== */}
+      {/* ==================== PLANETA 4: PLANETA DE LA FE (BAUTIZO) ==================== */}
       {config.id === 'planeta-fe' && (
         <group>
           <pointLight
@@ -776,14 +767,11 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             distance={6.0}
           />
 
-          {/* BACKGROUND LAYER: Handcrafted Paper Chapel / Little Church */}
           <group position={[-0.08, 0.92, -0.26]}>
-            {/* Chapel Nave */}
             <mesh position={[0, 0.22, 0]} castShadow>
               <boxGeometry args={[0.44, 0.42, 0.34]} />
               <meshStandardMaterial {...paperRimMat} />
             </mesh>
-            {/* Pitched Roof */}
             <mesh
               position={[0, 0.52, 0]}
               rotation={[0, Math.PI / 4, 0]}
@@ -792,7 +780,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
               <coneGeometry args={[0.38, 0.28, 4]} />
               <meshStandardMaterial {...secondaryMat} />
             </mesh>
-            {/* Bell Tower */}
             <mesh position={[0, 0.68, 0.04]} castShadow>
               <boxGeometry args={[0.18, 0.36, 0.18]} />
               <meshStandardMaterial {...paperRimMat} />
@@ -805,7 +792,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
               <coneGeometry args={[0.16, 0.24, 4]} />
               <meshStandardMaterial {...warmGoldMat} />
             </mesh>
-            {/* Little Golden Cross on Spire */}
             <group position={[0, 1.12, 0.04]}>
               <mesh>
                 <boxGeometry args={[0.03, 0.16, 0.03]} />
@@ -816,7 +802,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
                 <meshStandardMaterial {...warmGoldMat} />
               </mesh>
             </group>
-            {/* Warm Stained-Glass Rose Window & Arched Door */}
             <mesh position={[0, 0.28, 0.175]}>
               <circleGeometry args={[0.08, 16]} />
               <meshBasicMaterial color="#ffe58f" />
@@ -827,7 +812,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Slender Olive / Cypress Paper Trees flanking the Chapel */}
           <group position={[-0.48, 0.82, -0.05]} rotation={[0, 0, 0.34]}>
             <mesh position={[0, 0.22, 0]} castShadow>
               <coneGeometry args={[0.11, 0.42, 12]} />
@@ -841,14 +825,11 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* MIDGROUND LAYER: White Paper Dove of Peace & Baptismal Font */}
           <group ref={faithDoveRef} position={[0.24, 1.98, 0.05]}>
-            {/* Dove Body */}
             <mesh rotation={[0, 0.3, 0.1]} scale={[1.4, 0.8, 0.8]}>
               <sphereGeometry args={[0.06, 12, 12]} />
               <meshStandardMaterial {...paperRimMat} />
             </mesh>
-            {/* Outspread Paper Wings */}
             <mesh position={[-0.02, 0.04, -0.05]} rotation={[0.5, 0.2, 0.3]}>
               <boxGeometry args={[0.14, 0.015, 0.08]} />
               <meshStandardMaterial {...paperRimMat} />
@@ -859,7 +840,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Small Baptismal Font of Warm Light next to landing spot */}
           <group position={[-0.3, 0.9, 0.3]} rotation={[0.22, 0, 0.22]}>
             <mesh position={[0, 0.08, 0]} castShadow>
               <cylinderGeometry args={[0.085, 0.06, 0.14, 12]} />
@@ -871,7 +851,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             </mesh>
           </group>
 
-          {/* Golden Baptismal Halo of Paper Stars */}
           <group ref={dioramaOrbitRef} position={[0, 1.35, -0.18]}>
             {[0, 1, 2, 3, 4].map((i) => {
               const a = (i * Math.PI * 2) / 5;
@@ -892,7 +871,6 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             })}
           </group>
 
-          {/* FOREGROUND PARALLAX LAYER: Glowing Baptismal Candles & White Lilies */}
           {[
             [-0.28, 0.72, 0.65],
             [0.32, 0.7, 0.64],
@@ -918,8 +896,9 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
       {/* ==================== PLANETA 5: EL DESTINO (CELEBRACIÓN CHRISTOPHER GABRIEL) ==================== */}
       {config.id === 'planeta-destino' && (
         <group>
+          {/* Double Festive Paper Rings around the Celebration Planet */}
           <mesh rotation={[Math.PI * 0.4, 0.18, -0.1]}>
-            <torusGeometry args={[1.48, 0.05, 12, 64]} />
+            <torusGeometry args={[1.48, 0.045, 12, 64]} />
             <meshStandardMaterial {...paperRimMat} />
           </mesh>
           <mesh rotation={[Math.PI * 0.45, -0.22, 0.12]}>
@@ -927,34 +906,106 @@ export const StorybookPlanet: React.FC<PlanetProps> = ({
             <meshStandardMaterial {...warmGoldMat} />
           </mesh>
 
-          <group position={[0, 1.02, -0.18]}>
-            <mesh position={[0, 0.14, 0]} castShadow>
-              <cylinderGeometry args={[0.38, 0.44, 0.26, 20]} />
+          {/* BACKGROUND LAYER: Royal Storybook Celebration Pavilion & Golden Star Crown */}
+          <group position={[0, 0.96, -0.28]}>
+            {/* Golden Archway Columns & Canopy */}
+            <mesh position={[-0.36, 0.28, 0]} castShadow>
+              <cylinderGeometry args={[0.032, 0.038, 0.56, 12]} />
               <meshStandardMaterial {...paperRimMat} />
             </mesh>
-            <mesh position={[0, 0.34, 0]} castShadow>
-              <cylinderGeometry args={[0.26, 0.32, 0.22, 20]} />
-              <meshStandardMaterial {...accentMat} />
+            <mesh position={[0.36, 0.28, 0]} castShadow>
+              <cylinderGeometry args={[0.032, 0.038, 0.56, 12]} />
+              <meshStandardMaterial {...paperRimMat} />
             </mesh>
+            <mesh position={[0, 0.56, 0]} castShadow>
+              <torusGeometry args={[0.36, 0.045, 12, 28, Math.PI]} />
+              <meshStandardMaterial {...warmGoldMat} />
+            </mesh>
+
+            {/* Glowing Guiding Star of Christopher Gabriel */}
             <mesh
+              ref={celebrationStarRef}
               geometry={starGeo}
-              position={[0, 0.68, 0]}
-              scale={1.35}
+              position={[0, 1.12, 0]}
+              scale={1.28}
               castShadow
             >
               <meshStandardMaterial
                 {...warmGoldMat}
                 emissive="#ffd659"
-                emissiveIntensity={0.48}
+                emissiveIntensity={0.55}
               />
             </mesh>
           </group>
 
+          {/* MIDGROUND LAYER: 1st Birthday Storybook Cake on Left & Festive Bunting on Right */}
+          <group position={[-0.46, 0.84, 0.16]} rotation={[0.12, 0.2, 0.35]}>
+            {/* Tier 1 */}
+            <mesh position={[0, 0.08, 0]} castShadow>
+              <cylinderGeometry args={[0.16, 0.18, 0.15, 18]} />
+              <meshStandardMaterial {...paperRimMat} />
+            </mesh>
+            {/* Tier 2 */}
+            <mesh position={[0, 0.2, 0]} castShadow>
+              <cylinderGeometry args={[0.11, 0.12, 0.12, 16]} />
+              <meshStandardMaterial {...roseRedMat} />
+            </mesh>
+            {/* Golden First Birthday Candle */}
+            <mesh position={[0, 0.3, 0]}>
+              <cylinderGeometry args={[0.016, 0.016, 0.1, 8]} />
+              <meshStandardMaterial {...warmGoldMat} />
+            </mesh>
+            <mesh position={[0, 0.37, 0]}>
+              <sphereGeometry args={[0.026, 8, 8]} />
+              <meshBasicMaterial color="#fff099" />
+            </mesh>
+          </group>
+
+          {/* Golden Baptismal Chalice / Star monument on Right */}
+          <group position={[0.48, 0.84, 0.16]} rotation={[0.12, -0.2, -0.35]}>
+            <mesh position={[0, 0.1, 0]} castShadow>
+              <cylinderGeometry args={[0.11, 0.14, 0.18, 16]} />
+              <meshStandardMaterial {...paperRimMat} />
+            </mesh>
+            <mesh
+              geometry={starGeo}
+              position={[0, 0.28, 0]}
+              scale={0.52}
+              castShadow
+            >
+              <meshStandardMaterial {...warmGoldMat} />
+            </mesh>
+          </group>
+
+          {/* Floating Golden Paper Lanterns / Balloons in Mid & Foreground */}
+          <group ref={celebrationLanternsRef}>
+            {[
+              [-0.68, 1.25, 0.25],
+              [0.68, 1.32, 0.22],
+              [-0.42, 1.48, -0.18],
+              [0.44, 1.45, -0.18],
+            ].map((pos, idx) => (
+              <group key={idx} position={pos as [number, number, number]}>
+                <mesh castShadow>
+                  <sphereGeometry args={[0.095, 14, 14]} />
+                  <meshStandardMaterial
+                    {...(idx % 2 === 0 ? warmGoldMat : roseRedMat)}
+                  />
+                </mesh>
+                <mesh position={[0, -0.14, 0]}>
+                  <cylinderGeometry args={[0.004, 0.004, 0.16, 6]} />
+                  <meshBasicMaterial color="#fff3d1" />
+                </mesh>
+              </group>
+            ))}
+          </group>
+
+          {/* Warm Golden Point Light radiating from the Destination Planet */}
           <pointLight
-            position={[0, 1.5, 0.8]}
+            position={[0, 1.65, 1.1]}
             color="#ffe596"
-            intensity={1.6}
-            distance={9}
+            intensity={isFocused ? 2.2 : 1.5}
+            distance={11}
           />
         </group>
       )}

@@ -57,6 +57,14 @@ body,
   border-radius: 22px;
   pointer-events: none;
   box-shadow: inset 0 0 40px rgba(14, 21, 38, 0.35);
+  transition: border-color 0.8s ease, box-shadow 0.8s ease;
+}
+
+.shadowbox-frame-border.is-golden-finale {
+  border-color: rgba(243, 200, 107, 0.55);
+  box-shadow:
+    inset 0 0 55px rgba(243, 200, 107, 0.18),
+    inset 0 0 25px rgba(14, 21, 38, 0.35);
 }
 
 /* HUD Layout */
@@ -220,6 +228,65 @@ body,
   color: var(--ink-soft);
 }
 
+/* ==================== ESCENA 05: PROTAGONIST SKY REVEAL ==================== */
+.finale-sky-protagonist-reveal {
+  align-self: center;
+  text-align: center;
+  margin-top: 2px;
+  margin-bottom: auto;
+  padding: 10px 24px 12px;
+  border-radius: 20px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(24, 36, 62, 0.72) 0%,
+    rgba(24, 36, 62, 0.28) 75%,
+    rgba(24, 36, 62, 0) 100%
+  );
+  animation: fadeSlideDown 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.finale-star-crown {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #ffe28a;
+  margin-bottom: 4px;
+}
+
+.finale-protagonist-name {
+  font-family: var(--font-serif);
+  font-size: clamp(1.75rem, 4.5vw, 2.75rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff8e6;
+  text-shadow:
+    0 2px 14px rgba(243, 198, 119, 0.65),
+    0 4px 24px rgba(0, 0, 0, 0.6);
+  line-height: 1.08;
+}
+
+.finale-event-subtitle {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(1.08rem, 2.4vw, 1.42rem);
+  color: #fce29c;
+  margin-top: 2px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes fadeSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* Subtle pill while flying between worlds */
 .camera-flight-pill {
   align-self: center;
@@ -271,7 +338,7 @@ body,
   pointer-events: auto;
   max-width: 540px;
   width: 100%;
-  background: rgba(251, 246, 235, 0.93);
+  background: rgba(251, 246, 235, 0.94);
   color: var(--ink-night);
   border: 2px solid #e7d8be;
   border-radius: 22px;
@@ -281,6 +348,27 @@ body,
     0 14px 34px rgba(10, 17, 32, 0.42),
     0 0 0 4px rgba(251, 246, 235, 0.14);
   backdrop-filter: blur(8px);
+}
+
+.is-finale-intro-card {
+  border-color: #e4b962;
+  box-shadow:
+    0 14px 38px rgba(10, 17, 32, 0.48),
+    0 0 0 5px rgba(243, 200, 107, 0.22);
+}
+
+.finale-date-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgba(243, 198, 119, 0.28);
+  border: 1px solid #d49e3d;
+  color: #6e4b11;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 8px;
 }
 
 .planet-card-header-row {
@@ -404,70 +492,237 @@ body,
   opacity: 0.88;
 }
 
-/* Validation Modal */
-.phase-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
+/* ==================== ESCENA 05: FULL PROGRESSIVE INVITATION SHEET ==================== */
+.storybook-invitation-sheet {
   pointer-events: auto;
-  background: rgba(15, 23, 42, 0.65);
-  backdrop-filter: blur(5px);
+  max-width: 660px;
+  width: 100%;
+  max-height: 76dvh;
+  overflow-y: auto;
+  background: rgba(251, 246, 235, 0.96);
+  color: var(--ink-night);
+  border: 2px solid #dfbe78;
+  border-radius: 24px;
+  padding: 18px 22px 16px;
+  box-shadow:
+    0 18px 44px rgba(8, 14, 28, 0.55),
+    0 0 0 5px rgba(243, 200, 107, 0.22);
+  backdrop-filter: blur(12px);
+}
+
+.invitation-sheet-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 18px;
-}
-
-.phase-modal-card {
-  max-width: 460px;
-  width: 100%;
-  background: var(--paper-cream);
-  color: var(--ink-night);
-  border: 2px solid #e4d3b5;
-  border-radius: 22px;
-  padding: 24px 22px;
-  text-align: center;
-  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
-}
-
-.phase-modal-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: #f6e3b4;
-  color: #7c5616;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  margin-bottom: 10px;
-}
-
-.phase-modal-card h2 {
-  font-family: var(--font-serif);
-  font-size: 1.5rem;
-  margin-bottom: 10px;
-}
-
-.phase-modal-card p {
-  font-size: 0.9rem;
-  line-height: 1.48;
-  color: var(--ink-soft);
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px dashed #dcc8a4;
+  padding-bottom: 10px;
   margin-bottom: 12px;
 }
 
-.phase-modal-sub {
-  background: rgba(243, 200, 107, 0.18);
-  padding: 10px 14px;
-  border-radius: 12px;
-  font-size: 0.84rem !important;
+.sheet-kicker {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8c621c;
 }
 
-.modal-actions-row {
+.sheet-protagonist {
+  font-family: var(--font-serif);
+  font-size: clamp(1.3rem, 2.8vw, 1.7rem);
+  font-weight: 700;
+  color: var(--ink-night);
+}
+
+.btn-minimize-sheet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid #d5c29f;
+  background: #f5ebd6;
+  color: var(--ink-night);
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.invitation-date-banner {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, #faecc8 0%, #f5dfab 50%, #faecc8 100%);
+  border: 1px solid #dfb968;
+  color: #54390b;
+  font-size: 0.88rem;
+  margin-bottom: 12px;
+}
+
+.invitation-events-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.event-detail-box {
+  background: rgba(255, 252, 245, 0.92);
+  border: 1.5px solid #e6d6b8;
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+}
+
+.event-box-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #6b4912;
+}
+
+.event-time-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82rem;
+  color: var(--ink-night);
+}
+
+.event-place-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink-night);
+}
+
+.event-place-address {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+
+.btn-maps-link {
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #f3e6cc;
+  border: 1px solid #d5be92;
+  color: #3a2b14;
+  text-decoration: none;
+  font-size: 0.76rem;
+  font-weight: 700;
+  transition: background 0.2s ease;
+}
+
+.btn-maps-link:hover {
+  background: #ebd7b0;
+}
+
+/* RSVP Box */
+.invitation-rsvp-box {
+  background: rgba(245, 235, 214, 0.65);
+  border: 1.5px solid #e2cfa9;
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  margin-top: 8px;
+}
+
+.rsvp-inputs-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.rsvp-name-input,
+.rsvp-count-select {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid #cfb991;
+  background: #fffdf9;
+  color: var(--ink-night);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  font-weight: 600;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rsvp-buttons-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.btn-whatsapp-rsvp {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #429e6d 0%, #2e7d53 100%);
+  border: 1.5px solid #246341;
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 700;
+  box-shadow: 0 5px 15px rgba(46, 125, 83, 0.35);
+  transition: transform 0.2s ease;
+}
+
+.btn-whatsapp-rsvp:hover {
+  transform: translateY(-1px);
+}
+
+/* Progressive Stagger Animations for Invitation Items */
+@keyframes revealStagger {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-item-1 {
+  opacity: 0;
+  animation: revealStagger 0.45s ease forwards 0.05s;
+}
+.stagger-item-2 {
+  opacity: 0;
+  animation: revealStagger 0.45s ease forwards 0.18s;
+}
+.stagger-item-3 {
+  opacity: 0;
+  animation: revealStagger 0.45s ease forwards 0.32s;
+}
+.stagger-item-4 {
+  opacity: 0;
+  animation: revealStagger 0.45s ease forwards 0.46s;
 }
 
 /* Fallback */
@@ -497,7 +752,7 @@ body,
   }
 
   .hud-root {
-    padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .hud-btn-label {
@@ -515,18 +770,38 @@ body,
   }
 
   .storybook-quote {
-    font-size: 1.08rem;
+    font-size: 1.06rem;
     margin-bottom: 10px;
   }
 
   .btn-start-journey,
   .btn-secondary-journey {
     min-height: 44px;
-    padding: 9px 16px;
-    font-size: 0.85rem;
+    padding: 9px 15px;
+    font-size: 0.84rem;
   }
 
   .parallax-hint {
     font-size: 0.68rem;
+  }
+
+  .storybook-invitation-sheet {
+    padding: 14px 14px 12px;
+    border-radius: 18px;
+    max-height: 74dvh;
+  }
+
+  .invitation-events-grid {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .rsvp-inputs-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rsvp-buttons-row {
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 }

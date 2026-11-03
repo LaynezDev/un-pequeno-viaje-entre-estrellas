@@ -27,7 +27,6 @@ export const App: React.FC = () => {
   const [paused, setPaused] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [parallaxOffset, setParallaxOffset] = useState({ x: 0, y: 0 });
-  const [phase4NoticeOpen, setPhase4NoticeOpen] = useState(false);
 
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -90,7 +89,7 @@ export const App: React.FC = () => {
     setPaused((prev) => !prev);
   }, []);
 
-  // Advance through Universe -> Planet 1 -> Planet 2 (Amor) -> Planet 3 (Sueños) -> Planet 4 (Fe)
+  // Advance through Universe -> Planet 1 -> Planet 2 -> Planet 3 -> Planet 4 -> Planet 5 (El Destino)
   const handleNextStage = useCallback(() => {
     if (isTransitioning) return;
     ambientAudio.playChime();
@@ -104,8 +103,8 @@ export const App: React.FC = () => {
       setStage('planet-3');
     } else if (stage === 'planet-3') {
       setStage('planet-4');
-    } else {
-      setPhase4NoticeOpen(true);
+    } else if (stage === 'planet-4') {
+      setStage('planet-5');
     }
   }, [stage, isTransitioning]);
 
@@ -115,7 +114,9 @@ export const App: React.FC = () => {
     ambientAudio.playChime();
     setParallaxOffset({ x: 0, y: 0 });
 
-    if (stage === 'planet-4') {
+    if (stage === 'planet-5') {
+      setStage('planet-4');
+    } else if (stage === 'planet-4') {
       setStage('planet-3');
     } else if (stage === 'planet-3') {
       setStage('planet-2');
@@ -193,8 +194,6 @@ export const App: React.FC = () => {
         onNextStage={handleNextStage}
         onPrevStage={handlePrevStage}
         onSelectStage={handleSelectStage}
-        phase4NoticeOpen={phase4NoticeOpen}
-        onClosePhase4Notice={() => setPhase4NoticeOpen(false)}
       />
     </main>
   );
