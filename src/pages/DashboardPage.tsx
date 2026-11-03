@@ -18,12 +18,14 @@ import {
 } from 'lucide-react';
 import {
   FamilyGroup,
+  FirestoreInitStatus,
   GlobalInvitationSettings,
   InvitationMember,
   InvitationRecord,
   deleteFamilyGroup,
   deleteInvitationRecord,
   generateInvitationToken,
+  initializeFirestoreSettings,
   seedPicapiedraExampleToDatabase,
   subscribeToDashboardData,
   updateGlobalSettings,
@@ -89,6 +91,15 @@ export const DashboardPage: React.FC = () => {
     existingCreds?.authDomain ?? ''
   );
   const [fbAppId, setFbAppId] = useState(existingCreds?.appId ?? '');
+  const [firestoreInit, setFirestoreInit] =
+    useState<FirestoreInitStatus | null>(null);
+
+  // Immediately initialize settings/general (PIN & deadline) in Firestore on page load
+  useEffect(() => {
+    void initializeFirestoreSettings().then((res) => {
+      setFirestoreInit(res);
+    });
+  }, []);
 
   useEffect(() => {
     if (!unlocked) return;
@@ -340,6 +351,56 @@ export const DashboardPage: React.FC = () => {
           <small className="pin-hint">
             PIN inicial por defecto en base de datos: <strong>2026</strong>
           </small>
+
+          {firestoreInit?.status === 'connected' && (
+            <small
+              className="pin-hint"
+              style={{
+                display: 'block',
+                marginTop: '0.6rem',
+                color: '#7ed9a6',
+              }}
+            >
+              ✓ Conectado a Firestore ({firestoreInit.projectId}) •{' '}
+              <code>settings/general</code> activo
+            </small>
+          )}
+
+          {firestoreInit?.status === 'permission-denied' && (
+            <div
+              style={{
+                marginTop: '0.85rem',
+                padding: '0.75rem',
+                borderRadius: '10px',
+                background: 'rgba(232, 111, 124, 0.14)',
+                border: '1px solid rgba(232, 111, 124, 0.4)',
+                fontSize: '0.78rem',
+                color: '#ffd6db',
+                textAlign: 'left',
+              }}
+            >
+              <strong>⚠️ Reglas de Firestore bloqueadas:</strong> Ve a Firebase
+              Console → <em>Firestore Database → Reglas</em> y cambia{' '}
+              <code>allow read, write: if false;</code> por{' '}
+              <code>allow read, write: if true;</code> para permitir crear el
+              PIN y guardar las invitaciones.
+            </div>
+          )}
+
+          {firestoreInit?.status === 'local-only' && (
+            <small
+              className="pin-hint"
+              style={{
+                display: 'block',
+                marginTop: '0.6rem',
+                color: '#f3c677',
+              }}
+            >
+              ℹ️Ingresa con <strong>2026</strong> y ve a la pestaña{' '}
+              <strong>Parámetros y Firebase</strong> para vincular las
+              credenciales Web de tu proyecto Firestore.
+            </small>
+          )}
         </div>
       </div>
     );

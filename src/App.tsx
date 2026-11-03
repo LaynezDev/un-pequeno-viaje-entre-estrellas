@@ -18,6 +18,7 @@ import {
   FamilyGroup,
   GlobalInvitationSettings,
   InvitationRecord,
+  initializeFirestoreSettings,
   subscribeToInvitationByToken,
 } from './services/invitationService';
 
@@ -98,6 +99,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     setWebglSupported(checkWebGLAvailable());
+    void initializeFirestoreSettings();
 
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     setPrefersReducedMotion(mediaQuery.matches);

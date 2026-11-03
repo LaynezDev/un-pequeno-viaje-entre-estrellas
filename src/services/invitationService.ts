@@ -239,20 +239,99 @@ export function isModificationAllowed(deadlineIso: string): boolean {
   return Date.now() <= deadlineTime;
 }
 
+export interface FirestoreInitStatus {
+  status: 'connected' | 'local-only' | 'permission-denied' | 'error';
+  projectId?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Ensures the settings/general document (containing dashboardPin & rsvpDeadline)
+ * exists in Firestore as soon as the application or dashboard loads.
+ */
+export async function initializeFirestoreSettings(): Promise<FirestoreInitStatus> {
+  const db = getDb();
+  if (!db) {
+    return { status: 'local-only' };
+  }
+
+  const projectId = db.app.options.projectId;
+  try {
+    const ref = doc(db, 'settings', 'general');
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        ...DEFAULT_SETTINGS,
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      const data = snap.data() as Partial<GlobalInvitationSettings>;
+      if (!data.dashboardPin) {
+        await setDoc(
+          ref,
+          {
+            ...DEFAULT_SETTINGS,
+            ...data,
+            dashboardPin: DEFAULT_SETTINGS.dashboardPin,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+    }
+    return { status: 'connected', projectId };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = (err as { code?: string })?.code || '';
+    if (
+      code.includes('permission-denied') ||
+      msg.toLowerCase().includes('permission')
+    ) {
+      return {
+        status: 'permission-denied',
+        projectId,
+        errorMessage: msg,
+      };
+    }
+    return {
+      status: 'error',
+      projectId,
+      errorMessage: msg,
+    };
+  }
+}
+
 /**
  * Fetch Global Settings (PIN & RSVP Deadline) from Firebase or Local
  */
 export async function fetchGlobalSettings(): Promise<GlobalInvitationSettings> {
   const db = getDb();
   if (db) {
-    const ref = doc(db, 'settings', 'general');
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      return snap.data() as GlobalInvitationSettings;
+    try {
+      const ref = doc(db, 'settings', 'general');
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data() as Partial<GlobalInvitationSettings>;
+        return {
+          ...DEFAULT_SETTINGS,
+          ...data,
+          dashboardPin: data.dashboardPin || DEFAULT_SETTINGS.dashboardPin,
+        };
+      }
+      // Initialize default settings in Firestore if not present yet
+      const initialSettings: GlobalInvitationSettings = {
+        ...DEFAULT_SETTINGS,
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(ref, initialSettings);
+      return initialSettings;
+    } catch (err) {
+      console.warn(
+        'No se pudo leer/crear settings/general en Firestore, usando respaldo local:',
+        err
+      );
+      return getLocalSettings();
     }
-    // Initialize default settings in Firestore if not present yet
-    await setDoc(ref, DEFAULT_SETTINGS);
-    return DEFAULT_SETTINGS;
   }
   return getLocalSettings();
 }
@@ -525,9 +604,20 @@ export function subscribeToDashboardData(
 
     const emit = () => callback({ settings, families, invitations });
 
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'general'), (snap) => {
+    const settingsRef = doc(db, 'settings', 'general');
+    const unsubSettings = onSnapshot(settingsRef, (snap) => {
       if (snap.exists()) {
         settings = snap.data() as GlobalInvitationSettings;
+        emit();
+      } else {
+        const initial: GlobalInvitationSettings = {
+          ...DEFAULT_SETTINGS,
+          updatedAt: new Date().toISOString(),
+        };
+        setDoc(settingsRef, initial).catch(() => {
+          // ignore if rules block write
+        });
+        settings = initial;
         emit();
       }
     });

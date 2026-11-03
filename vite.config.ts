@@ -10,6 +10,7 @@ const buildFirebaseWebappConfig =
 
 export default defineConfig({
   plugins: [react()],
+  envPrefix: ['VITE_', 'FIREBASE_'],
   define: {
     __BUILD_FIREBASE_WEBAPP_CONFIG__: JSON.stringify(buildFirebaseWebappConfig),
   },
