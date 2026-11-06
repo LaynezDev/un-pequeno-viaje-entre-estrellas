@@ -1,0 +1,24 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Configuración global (PIN del dashboard y fecha límite de confirmación)
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
+
+    // Grupos familiares (ej. Familia Picapiedra)
+    match /families/{familyId} {
+      allow read, write: if true;
+    }
+
+    // Invitaciones individuales y por pareja con token único
+    match /invitations/{invitationId} {
+      allow read, write: if true;
+    }
+
+    // Mesas de recepción y asignación de asientos
+    match /tables/{tableId} {
+      allow read, write: if true;
+    }
+  }
+}

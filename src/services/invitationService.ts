@@ -25,6 +25,14 @@ export interface FamilyGroup {
   createdAt: string;
 }
 
+export interface EventTable {
+  id: string;
+  name: string;
+  capacity: number;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface InvitationRecord {
   id: string;
   token: string;
@@ -42,6 +50,10 @@ export interface InvitationRecord {
   plusOneNames: string[];
   /** Mensaje opcional para Christopher Gabriel */
   notes?: string;
+  /** Número de teléfono / WhatsApp del contacto de la invitación */
+  phone?: string;
+  /** ID de la mesa asignada para el evento */
+  tableId?: string | null;
   respondedAt: string | null;
   createdAt: string;
 }
@@ -57,6 +69,7 @@ export interface GlobalInvitationSettings {
 const LS_SETTINGS_KEY = 'cg_inv_settings_v1';
 const LS_FAMILIES_KEY = 'cg_inv_families_v1';
 const LS_INVITATIONS_KEY = 'cg_inv_records_v1';
+const LS_TABLES_KEY = 'cg_inv_tables_v1';
 
 const DEFAULT_SETTINGS: GlobalInvitationSettings = {
   dashboardPin: '2026',
@@ -81,12 +94,13 @@ export function generateInvitationToken(prefix = 'inv'): string {
 
 /**
  * Default seed data demonstrating the exact "Familia Picapiedra" (5 people across 4 invitations)
- * + an individual invitation with +2 companions.
+ * + an individual invitation with +2 companions and event reception tables.
  */
 function getInitialDemoSeed(): {
   settings: GlobalInvitationSettings;
   families: FamilyGroup[];
   invitations: InvitationRecord[];
+  tables: EventTable[];
 } {
   const now = new Date().toISOString();
   const familyId = 'fam-picapiedra';
@@ -95,6 +109,30 @@ function getInitialDemoSeed(): {
     {
       id: familyId,
       name: 'Familia Picapiedra',
+      createdAt: now,
+    },
+  ];
+
+  const tables: EventTable[] = [
+    {
+      id: 'tbl-1',
+      name: 'Mesa 1 - Familiares',
+      capacity: 8,
+      notes: 'Cerca de la mesa de honor',
+      createdAt: now,
+    },
+    {
+      id: 'tbl-2',
+      name: 'Mesa 2 - Amigos',
+      capacity: 10,
+      notes: 'Área jardín central',
+      createdAt: now,
+    },
+    {
+      id: 'tbl-3',
+      name: 'Mesa 3 - Padrinos',
+      capacity: 6,
+      notes: 'Mesa de honor',
       createdAt: now,
     },
   ];
@@ -113,6 +151,8 @@ function getInitialDemoSeed(): {
       selectedPlusOnesCount: 0,
       plusOneNames: [],
       notes: '¡Muchas felicidades por el bautizo y primer añito de Christopher Gabriel!',
+      phone: '+502 5555 1234',
+      tableId: 'tbl-1',
       respondedAt: now,
       createdAt: now,
     },
@@ -128,6 +168,8 @@ function getInitialDemoSeed(): {
       selectedPlusOnesCount: 1,
       plusOneNames: ['Vilma de Picapiedra'],
       notes: '',
+      phone: '+502 5555 5678',
+      tableId: 'tbl-1',
       respondedAt: now,
       createdAt: now,
     },
@@ -143,6 +185,8 @@ function getInitialDemoSeed(): {
       selectedPlusOnesCount: 0,
       plusOneNames: [],
       notes: '',
+      phone: '+502 5555 9012',
+      tableId: 'tbl-1',
       respondedAt: null,
       createdAt: now,
     },
@@ -158,6 +202,8 @@ function getInitialDemoSeed(): {
       selectedPlusOnesCount: 0,
       plusOneNames: [],
       notes: '',
+      phone: '+502 5555 3456',
+      tableId: null,
       respondedAt: null,
       createdAt: now,
     },
@@ -173,6 +219,8 @@ function getInitialDemoSeed(): {
       selectedPlusOnesCount: 0,
       plusOneNames: [],
       notes: '',
+      phone: '+502 5555 7890',
+      tableId: 'tbl-2',
       respondedAt: null,
       createdAt: now,
     },
@@ -182,6 +230,7 @@ function getInitialDemoSeed(): {
     settings: DEFAULT_SETTINGS,
     families,
     invitations,
+    tables,
   };
 }
 
@@ -193,6 +242,7 @@ function ensureLocalSeed() {
     localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(seed.settings));
     localStorage.setItem(LS_FAMILIES_KEY, JSON.stringify(seed.families));
     localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(seed.invitations));
+    localStorage.setItem(LS_TABLES_KEY, JSON.stringify(seed.tables));
   }
 }
 
@@ -218,6 +268,16 @@ function getLocalInvitations(): InvitationRecord[] {
   ensureLocalSeed();
   try {
     return JSON.parse(localStorage.getItem(LS_INVITATIONS_KEY)!) as InvitationRecord[];
+  } catch {
+    return [];
+  }
+}
+
+function getLocalTables(): EventTable[] {
+  ensureLocalSeed();
+  try {
+    const raw = localStorage.getItem(LS_TABLES_KEY);
+    return raw ? (JSON.parse(raw) as EventTable[]) : [];
   } catch {
     return [];
   }
@@ -594,6 +654,7 @@ export function subscribeToDashboardData(
     settings: GlobalInvitationSettings;
     families: FamilyGroup[];
     invitations: InvitationRecord[];
+    tables: EventTable[];
   }) => void
 ): () => void {
   const db = getDb();
@@ -601,8 +662,9 @@ export function subscribeToDashboardData(
     let settings = DEFAULT_SETTINGS;
     let families: FamilyGroup[] = [];
     let invitations: InvitationRecord[] = [];
+    let tables: EventTable[] = [];
 
-    const emit = () => callback({ settings, families, invitations });
+    const emit = () => callback({ settings, families, invitations, tables });
 
     const settingsRef = doc(db, 'settings', 'general');
     const unsubSettings = onSnapshot(settingsRef, (snap) => {
@@ -632,10 +694,16 @@ export function subscribeToDashboardData(
       emit();
     });
 
+    const unsubTables = onSnapshot(collection(db, 'tables'), (snap) => {
+      tables = snap.docs.map((d) => d.data() as EventTable);
+      emit();
+    });
+
     return () => {
       unsubSettings();
       unsubFamilies();
       unsubInvs();
+      unsubTables();
     };
   }
 
@@ -644,6 +712,7 @@ export function subscribeToDashboardData(
       settings: getLocalSettings(),
       families: getLocalFamilies(),
       invitations: getLocalInvitations(),
+      tables: getLocalTables(),
     });
   };
   emitLocal();
@@ -678,6 +747,162 @@ export async function deleteFamilyGroup(familyId: string): Promise<void> {
   notifyLocalChange();
 }
 
+export async function upsertTable(table: EventTable): Promise<void> {
+  const db = getDb();
+  if (db) {
+    await setDoc(doc(db, 'tables', table.id), table);
+  }
+  const all = getLocalTables();
+  const idx = all.findIndex((t) => t.id === table.id);
+  if (idx >= 0) all[idx] = table;
+  else all.push(table);
+  localStorage.setItem(LS_TABLES_KEY, JSON.stringify(all));
+  notifyLocalChange();
+}
+
+export async function deleteTable(tableId: string): Promise<void> {
+  const db = getDb();
+  if (db) {
+    await deleteDoc(doc(db, 'tables', tableId));
+  }
+  const all = getLocalTables().filter((t) => t.id !== tableId);
+  localStorage.setItem(LS_TABLES_KEY, JSON.stringify(all));
+
+  // Desasignar tableId de las invitaciones vinculadas a esta mesa
+  const allInvs = getLocalInvitations();
+  let modified = false;
+  for (const inv of allInvs) {
+    if (inv.tableId === tableId) {
+      inv.tableId = null;
+      modified = true;
+      if (db) {
+        await setDoc(doc(db, 'invitations', inv.id), inv);
+      }
+    }
+  }
+  if (modified) {
+    localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(allInvs));
+  }
+  notifyLocalChange();
+}
+
+export async function assignInvitationToTable(
+  invitationId: string,
+  tableId: string | null
+): Promise<void> {
+  const db = getDb();
+  if (db) {
+    const ref = doc(db, 'invitations', invitationId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await setDoc(ref, { tableId: tableId || null }, { merge: true });
+    }
+  }
+  const all = getLocalInvitations();
+  const idx = all.findIndex((i) => i.id === invitationId);
+  if (idx >= 0) {
+    all[idx].tableId = tableId || null;
+    localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
+  }
+  notifyLocalChange();
+}
+
+export async function updateInvitationPhone(
+  invitationId: string,
+  phone: string
+): Promise<void> {
+  const cleanPhone = phone.trim();
+  const db = getDb();
+  if (db) {
+    const ref = doc(db, 'invitations', invitationId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await setDoc(ref, { phone: cleanPhone }, { merge: true });
+    }
+  }
+  const all = getLocalInvitations();
+  const idx = all.findIndex((i) => i.id === invitationId);
+  if (idx >= 0) {
+    all[idx].phone = cleanPhone;
+    localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
+  }
+  notifyLocalChange();
+}
+
+export interface TableOccupancyStats {
+  assignedInvitations: InvitationRecord[];
+  confirmedCount: number;
+  expectedCount: number;
+  availableSeats: number;
+  isOverCapacity: boolean;
+  memberNames: { name: string; status: AttendanceStatus; invitationTitle: string }[];
+}
+
+export function calculateTableOccupancy(
+  tableId: string,
+  tableCapacity: number,
+  invitations: InvitationRecord[]
+): TableOccupancyStats {
+  const assigned = invitations.filter((inv) => inv.tableId === tableId);
+  let confirmedCount = 0;
+  let expectedCount = 0;
+  const memberNames: { name: string; status: AttendanceStatus; invitationTitle: string }[] = [];
+
+  for (const inv of assigned) {
+    let hasAttending = false;
+    for (const m of inv.members) {
+      if (m.status === 'attending') {
+        confirmedCount++;
+        expectedCount++;
+        hasAttending = true;
+        memberNames.push({
+          name: m.name,
+          status: 'attending',
+          invitationTitle: inv.displayTitle,
+        });
+      } else if (m.status === 'pending') {
+        expectedCount++;
+        memberNames.push({
+          name: m.name,
+          status: 'pending',
+          invitationTitle: inv.displayTitle,
+        });
+      } else {
+        memberNames.push({
+          name: m.name,
+          status: 'declined',
+          invitationTitle: inv.displayTitle,
+        });
+      }
+    }
+
+    if (hasAttending && inv.selectedPlusOnesCount > 0) {
+      confirmedCount += inv.selectedPlusOnesCount;
+      expectedCount += inv.selectedPlusOnesCount;
+      for (const pName of inv.plusOneNames) {
+        memberNames.push({
+          name: `${pName} (+1)`,
+          status: 'attending',
+          invitationTitle: inv.displayTitle,
+        });
+      }
+    }
+  }
+
+  const occupiedForCapacity = confirmedCount > 0 ? confirmedCount : expectedCount;
+  const availableSeats = Math.max(0, tableCapacity - occupiedForCapacity);
+  const isOverCapacity = occupiedForCapacity > tableCapacity;
+
+  return {
+    assignedInvitations: assigned,
+    confirmedCount,
+    expectedCount,
+    availableSeats,
+    isOverCapacity,
+    memberNames,
+  };
+}
+
 export async function upsertInvitationRecord(
   record: InvitationRecord
 ): Promise<void> {
@@ -705,7 +930,7 @@ export async function deleteInvitationRecord(id: string): Promise<void> {
 
 /**
  * Seeds or restores the "Familia Picapiedra" (4 invitations for 5 family members + 1 individual +3)
- * into Firebase Firestore and Local Storage.
+ * along with reception tables into Firebase Firestore and Local Storage.
  */
 export async function seedPicapiedraExampleToDatabase(): Promise<void> {
   const seed = getInitialDemoSeed();
@@ -719,12 +944,16 @@ export async function seedPicapiedraExampleToDatabase(): Promise<void> {
     for (const fam of seed.families) {
       await setDoc(doc(db, 'families', fam.id), fam);
     }
+    for (const tbl of seed.tables) {
+      await setDoc(doc(db, 'tables', tbl.id), tbl);
+    }
     for (const inv of seed.invitations) {
       await setDoc(doc(db, 'invitations', inv.id), inv);
     }
   }
 
   localStorage.setItem(LS_FAMILIES_KEY, JSON.stringify(seed.families));
+  localStorage.setItem(LS_TABLES_KEY, JSON.stringify(seed.tables));
   localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(seed.invitations));
   notifyLocalChange();
 }

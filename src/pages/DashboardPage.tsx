@@ -15,22 +15,40 @@ import {
   Share2,
   Edit3,
   LogOut,
+  Phone,
+  Table,
+  ClipboardList,
+  Search,
+  MessageCircle,
+  AlertTriangle,
+  X,
+  UserCheck,
+  CheckCircle2,
+  XCircle,
+  Clock,
 } from 'lucide-react';
 import {
+  AttendanceStatus,
+  EventTable,
   FamilyGroup,
   FirestoreInitStatus,
   GlobalInvitationSettings,
   InvitationMember,
   InvitationRecord,
+  assignInvitationToTable,
+  calculateTableOccupancy,
   deleteFamilyGroup,
   deleteInvitationRecord,
+  deleteTable,
   generateInvitationToken,
   initializeFirestoreSettings,
   seedPicapiedraExampleToDatabase,
   subscribeToDashboardData,
   updateGlobalSettings,
+  updateInvitationPhone,
   upsertFamilyGroup,
   upsertInvitationRecord,
+  upsertTable,
   verifyDashboardPin,
 } from '../services/invitationService';
 import {
@@ -41,6 +59,20 @@ import {
 import { invitationConfig } from '../config/invitationConfig';
 
 const SESSION_AUTH_KEY = 'cg_dashboard_unlocked_v1';
+
+interface FlattenedGuest {
+  uniqueId: string;
+  name: string;
+  isPlusOne: boolean;
+  status: AttendanceStatus;
+  invitationId: string;
+  invitationTitle: string;
+  token: string;
+  phone?: string;
+  tableId?: string | null;
+  familyGroupId?: string | null;
+  familyName?: string;
+}
 
 export const DashboardPage: React.FC = () => {
   const [unlocked, setUnlocked] = useState<boolean>(() => {
@@ -58,30 +90,52 @@ export const DashboardPage: React.FC = () => {
   });
   const [families, setFamilies] = useState<FamilyGroup[]>([]);
   const [invitations, setInvitations] = useState<InvitationRecord[]>([]);
+  const [tables, setTables] = useState<EventTable[]>([]);
   const [activeTab, setActiveTab] = useState<
-    'invitations' | 'families' | 'settings'
-  >('invitations');
-  const [familyFilter, setFamilyFilter] = useState<string>('ALL');
+    'guests' | 'tables' | 'invitations' | 'families' | 'settings'
+  >('guests');
+
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Create / Edit Invitation Form State
+  // ==================== LISTA GENERAL DE INVITADOS FILTROS ====================
+  const [guestSearch, setGuestSearch] = useState('');
+  const [guestStatusFilter, setGuestStatusFilter] = useState<
+    'ALL' | 'attending' | 'declined' | 'pending'
+  >('ALL');
+  const [guestTableFilter, setGuestTableFilter] = useState<string>('ALL');
+  const [guestFamilyFilter, setGuestFamilyFilter] = useState<string>('ALL');
+  const [guestViewMode, setGuestViewMode] = useState<'by-person' | 'by-invitation'>('by-person');
+
+  // Quick Inline Phone Editing
+  const [quickPhoneInvId, setQuickPhoneInvId] = useState<string | null>(null);
+  const [quickPhoneValue, setQuickPhoneValue] = useState('');
+
+  // ==================== FORMULARIO DE INVITACIONES ====================
   const [editingId, setEditingId] = useState<string | null>(null);
   const [displayTitle, setDisplayTitle] = useState('');
   const [selectedFamilyId, setSelectedFamilyId] = useState<string>('');
   const [maxPlusOnes, setMaxPlusOnes] = useState<0 | 1 | 2 | 3>(0);
   const [customToken, setCustomToken] = useState('');
   const [memberNames, setMemberNames] = useState<string[]>(['']);
+  const [invPhone, setInvPhone] = useState('');
+  const [invTableId, setInvTableId] = useState<string>('');
   const [formFeedback, setFormFeedback] = useState('');
 
-  // Create Family Form State
+  // ==================== FORMULARIO DE MESAS ====================
+  const [editingTableId, setEditingTableId] = useState<string | null>(null);
+  const [tableName, setTableName] = useState('');
+  const [tableCapacity, setTableCapacity] = useState<number>(8);
+  const [tableNotes, setTableNotes] = useState('');
+  const [tableFormFeedback, setTableFormFeedback] = useState('');
+
+  // ==================== FORMULARIO DE FAMILIAS ====================
   const [newFamilyName, setNewFamilyName] = useState('');
 
-  // Settings Form State
+  // ==================== SETTINGS & FIREBASE ====================
   const [deadlineInput, setDeadlineInput] = useState('');
   const [newPinInput, setNewPinInput] = useState('');
   const [settingsSavedMsg, setSettingsSavedMsg] = useState('');
 
-  // Firebase Runtime Credentials Form State
   const existingCreds = getFirebaseCredentials();
   const [fbApiKey, setFbApiKey] = useState(existingCreds?.apiKey ?? '');
   const [fbProjectId, setFbProjectId] = useState(
@@ -109,6 +163,7 @@ export const DashboardPage: React.FC = () => {
       setNewPinInput(data.settings.dashboardPin);
       setFamilies(data.families);
       setInvitations(data.invitations);
+      setTables(data.tables);
     });
     return () => unsub();
   }, [unlocked]);
@@ -132,7 +187,7 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  // Summary metrics
+  // ==================== RESUMEN Y MÉTRICAS CALCULADAS ====================
   const stats = useMemo(() => {
     let totalMembers = 0;
     let attendingMembers = 0;
@@ -158,17 +213,289 @@ export const DashboardPage: React.FC = () => {
       }
     });
 
+    const attendingTotal = attendingMembers + totalPlusOnesConfirmed;
+    const totalPeople = totalMembers + totalPlusOnesConfirmed;
+
+    // Calcular cuántas personas que asisten ya tienen mesa asignada
+    let attendingWithTable = 0;
+    invitations.forEach((inv) => {
+      if (inv.tableId) {
+        const attMembers = inv.members.filter((m) => m.status === 'attending').length;
+        const plus = attMembers > 0 ? inv.selectedPlusOnesCount : 0;
+        attendingWithTable += attMembers + plus;
+      }
+    });
+
     return {
       totalInvitations: invitations.length,
       totalMembers,
-      attendingTotal: attendingMembers + totalPlusOnesConfirmed,
+      totalPeople,
+      attendingTotal,
       attendingMembers,
       totalPlusOnesConfirmed,
       declinedMembers,
       pendingMembers,
+      attendingWithTable,
+      attendingWithoutTable: Math.max(0, attendingTotal - attendingWithTable),
     };
   }, [invitations]);
 
+  // Métricas generales de mesas
+  const tableMetrics = useMemo(() => {
+    let totalSalonCapacity = 0;
+    let totalSeatsOccupied = 0;
+    let overcapacityTablesCount = 0;
+    let fullTablesCount = 0;
+
+    tables.forEach((tbl) => {
+      totalSalonCapacity += tbl.capacity;
+      const occ = calculateTableOccupancy(tbl.id, tbl.capacity, invitations);
+      totalSeatsOccupied += occ.confirmedCount;
+      if (occ.isOverCapacity) overcapacityTablesCount++;
+      else if (occ.confirmedCount >= tbl.capacity) fullTablesCount++;
+    });
+
+    const totalSeatsAvailable = Math.max(0, totalSalonCapacity - totalSeatsOccupied);
+
+    return {
+      totalTables: tables.length,
+      totalSalonCapacity,
+      totalSeatsOccupied,
+      totalSeatsAvailable,
+      overcapacityTablesCount,
+      fullTablesCount,
+    };
+  }, [tables, invitations]);
+
+  // Lista plana de personas individuales para la tabla nominal
+  const flattenedGuests = useMemo<FlattenedGuest[]>(() => {
+    const list: FlattenedGuest[] = [];
+
+    invitations.forEach((inv) => {
+      const famName = families.find((f) => f.id === inv.familyGroupId)?.name;
+
+      // Titulares de la invitación
+      inv.members.forEach((m, idx) => {
+        list.push({
+          uniqueId: `mem-${inv.id}-${m.id || idx}`,
+          name: m.name,
+          isPlusOne: false,
+          status: m.status,
+          invitationId: inv.id,
+          invitationTitle: inv.displayTitle,
+          token: inv.token,
+          phone: inv.phone,
+          tableId: inv.tableId,
+          familyGroupId: inv.familyGroupId,
+          familyName: famName,
+        });
+      });
+
+      // Acompañantes confirmados (+1, +2, +3) si algún titular asiste
+      const anyAttending = inv.members.some((m) => m.status === 'attending');
+      if (anyAttending && inv.selectedPlusOnesCount > 0 && inv.plusOneNames.length > 0) {
+        inv.plusOneNames.forEach((plusName, pIdx) => {
+          list.push({
+            uniqueId: `plus-${inv.id}-${pIdx}`,
+            name: plusName,
+            isPlusOne: true,
+            status: 'attending',
+            invitationId: inv.id,
+            invitationTitle: inv.displayTitle,
+            token: inv.token,
+            phone: inv.phone,
+            tableId: inv.tableId,
+            familyGroupId: inv.familyGroupId,
+            familyName: famName,
+          });
+        });
+      }
+    });
+
+    return list;
+  }, [invitations, families]);
+
+  // Filtro de invitados para la tabla
+  const filteredGuests = useMemo(() => {
+    return flattenedGuests.filter((g) => {
+      // Búsqueda por texto (nombre, invitación, teléfono, familia)
+      if (guestSearch.trim()) {
+        const query = guestSearch.toLowerCase().trim();
+        const matchName = g.name.toLowerCase().includes(query);
+        const matchTitle = g.invitationTitle.toLowerCase().includes(query);
+        const matchPhone = (g.phone || '').toLowerCase().includes(query);
+        const matchFam = (g.familyName || '').toLowerCase().includes(query);
+        if (!matchName && !matchTitle && !matchPhone && !matchFam) {
+          return false;
+        }
+      }
+
+      // Filtro de estado
+      if (guestStatusFilter !== 'ALL' && g.status !== guestStatusFilter) {
+        return false;
+      }
+
+      // Filtro de mesa
+      if (guestTableFilter === 'WITH_TABLE' && !g.tableId) return false;
+      if (guestTableFilter === 'WITHOUT_TABLE' && g.tableId) return false;
+      if (
+        guestTableFilter !== 'ALL' &&
+        guestTableFilter !== 'WITH_TABLE' &&
+        guestTableFilter !== 'WITHOUT_TABLE' &&
+        g.tableId !== guestTableFilter
+      ) {
+        return false;
+      }
+
+      // Filtro de familia
+      if (guestFamilyFilter !== 'ALL') {
+        if (guestFamilyFilter === 'NONE' && g.familyGroupId) return false;
+        if (guestFamilyFilter !== 'NONE' && g.familyGroupId !== guestFamilyFilter) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [
+    flattenedGuests,
+    guestSearch,
+    guestStatusFilter,
+    guestTableFilter,
+    guestFamilyFilter,
+  ]);
+
+  // ==================== HELPERS PARA WHATSAPP Y ENLACES ====================
+  const buildInvitationUrl = (token: string) => {
+    return `${window.location.origin}/?t=${encodeURIComponent(token)}`;
+  };
+
+  const cleanPhoneNumber = (raw?: string): string => {
+    if (!raw) return '';
+    return raw.replace(/[^0-9]/g, '');
+  };
+
+  const handleShareWhatsApp = (inv: InvitationRecord) => {
+    const url = buildInvitationUrl(inv.token);
+    const text = `✨ Hola *${inv.displayTitle}*, te compartimos tu invitación personal e interactiva para el Bautizo y Primer Cumpleaños de *${invitationConfig.protagonistName}*:\n\n👉 ${url}`;
+    const cleanPhone = cleanPhoneNumber(inv.phone);
+
+    let waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    if (cleanPhone.length >= 8) {
+      waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
+    }
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleCopyLink = (inv: InvitationRecord) => {
+    const url = buildInvitationUrl(inv.token);
+    navigator.clipboard.writeText(url);
+    setCopiedId(inv.id);
+    setTimeout(() => setCopiedId(null), 2200);
+  };
+
+  // ==================== ASIGNACIÓN RÁPIDA DE MESA CON VALIDACIÓN DE CUPO ====================
+  const handleQuickAssignTable = async (
+    invitationId: string,
+    targetTableId: string | null
+  ) => {
+    const inv = invitations.find((i) => i.id === invitationId);
+    if (!inv) return;
+
+    if (!targetTableId) {
+      await assignInvitationToTable(invitationId, null);
+      return;
+    }
+
+    const targetTable = tables.find((t) => t.id === targetTableId);
+    if (!targetTable) return;
+
+    // Calcular cuántos asientos requiere esta invitación
+    const attendingCount = inv.members.filter((m) => m.status === 'attending').length;
+    const requiredSeats =
+      attendingCount > 0 ? attendingCount + inv.selectedPlusOnesCount : inv.members.length;
+
+    // Calcular ocupación actual excluyendo esta misma invitación
+    const currentOccupancy = calculateTableOccupancy(
+      targetTable.id,
+      targetTable.capacity,
+      invitations.filter((i) => i.id !== invitationId)
+    );
+
+    const availableSeats = Math.max(0, targetTable.capacity - currentOccupancy.confirmedCount);
+
+    if (requiredSeats > availableSeats) {
+      const confirmMsg = `⚠️ Advertencia de Capacidad:\n\nLa mesa "${targetTable.name}" tiene capacidad para ${targetTable.capacity} personas y solo le quedan ${availableSeats} asientos libres.\nEsta invitación requiere ${requiredSeats} asientos.\n\nSi la asignas, la mesa quedará con sobrecupo (${currentOccupancy.confirmedCount + requiredSeats}/${targetTable.capacity}).\n\n¿Deseas asignarla de todas formas?`;
+      if (!window.confirm(confirmMsg)) {
+        return;
+      }
+    }
+
+    await assignInvitationToTable(invitationId, targetTableId);
+  };
+
+  // ==================== GUARDAR TELÉFONO RÁPIDO ====================
+  const handleSaveQuickPhone = async (invitationId: string) => {
+    await updateInvitationPhone(invitationId, quickPhoneValue);
+    setQuickPhoneInvId(null);
+    setQuickPhoneValue('');
+  };
+
+  // ==================== GESTIÓN DE MESAS (CRUD) ====================
+  const resetTableForm = () => {
+    setEditingTableId(null);
+    setTableName('');
+    setTableCapacity(8);
+    setTableNotes('');
+    setTableFormFeedback('');
+  };
+
+  const handleEditTable = (table: EventTable) => {
+    setEditingTableId(table.id);
+    setTableName(table.name);
+    setTableCapacity(table.capacity);
+    setTableNotes(table.notes || '');
+    setActiveTab('tables');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSaveTable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = tableName.trim();
+    if (!cleanName) {
+      setTableFormFeedback('Por favor ingresa un nombre para la mesa.');
+      return;
+    }
+    const cap = Math.max(1, Number(tableCapacity) || 8);
+
+    const record: EventTable = {
+      id: editingTableId || `tbl-${Date.now()}`,
+      name: cleanName,
+      capacity: cap,
+      notes: tableNotes.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    await upsertTable(record);
+    setTableFormFeedback(
+      editingTableId ? '¡Mesa actualizada correctamente!' : '¡Mesa creada correctamente!'
+    );
+    resetTableForm();
+    setTimeout(() => setTableFormFeedback(''), 3000);
+  };
+
+  const handleDeleteTable = async (table: EventTable) => {
+    const assignedCount = invitations.filter((i) => i.tableId === table.id).length;
+    const confirmMsg =
+      assignedCount > 0
+        ? `¿Eliminar "${table.name}"? Hay ${assignedCount} invitaciones asignadas a esta mesa que quedarán sin mesa.`
+        : `¿Eliminar la mesa "${table.name}"?`;
+    if (window.confirm(confirmMsg)) {
+      await deleteTable(table.id);
+    }
+  };
+
+  // ==================== GESTIÓN DE INVITACIONES (CRUD) ====================
   const resetInvitationForm = () => {
     setEditingId(null);
     setDisplayTitle('');
@@ -176,6 +503,9 @@ export const DashboardPage: React.FC = () => {
     setMaxPlusOnes(0);
     setCustomToken('');
     setMemberNames(['']);
+    setInvPhone('');
+    setInvTableId('');
+    setFormFeedback('');
   };
 
   const handleLoadInvitationForEdit = (inv: InvitationRecord) => {
@@ -185,6 +515,9 @@ export const DashboardPage: React.FC = () => {
     setMaxPlusOnes(inv.maxPlusOnes);
     setCustomToken(inv.token);
     setMemberNames(inv.members.map((m) => m.name));
+    setInvPhone(inv.phone || '');
+    setInvTableId(inv.tableId || '');
+    setActiveTab('invitations');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -200,6 +533,28 @@ export const DashboardPage: React.FC = () => {
     if (cleanedNames.length === 0) {
       setFormFeedback('Agrega al menos 1 persona titular en la invitación.');
       return;
+    }
+
+    // Validar capacidad de mesa si se asignó una
+    if (invTableId) {
+      const targetTable = tables.find((t) => t.id === invTableId);
+      if (targetTable) {
+        const occ = calculateTableOccupancy(
+          targetTable.id,
+          targetTable.capacity,
+          invitations.filter((i) => i.id !== editingId)
+        );
+        const reqSeats = cleanedNames.length;
+        if (reqSeats > targetTable.capacity - occ.confirmedCount) {
+          const proceed = window.confirm(
+            `⚠️ La mesa "${targetTable.name}" solo tiene ${Math.max(
+              0,
+              targetTable.capacity - occ.confirmedCount
+            )} asientos libres y esta invitación tiene ${reqSeats} titulares. ¿Deseas asignarla de todas formas?`
+          );
+          if (!proceed) return;
+        }
+      }
     }
 
     const existing = editingId
@@ -230,20 +585,21 @@ export const DashboardPage: React.FC = () => {
       selectedPlusOnesCount: existing?.selectedPlusOnesCount ?? 0,
       plusOneNames: existing?.plusOneNames ?? [],
       notes: existing?.notes ?? '',
+      phone: invPhone.trim(),
+      tableId: invTableId || null,
       respondedAt: existing?.respondedAt ?? null,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
 
     await upsertInvitationRecord(record);
     setFormFeedback(
-      editingId
-        ? '¡Invitación actualizada correctamente!'
-        : '¡Invitación creada correctamente!'
+      editingId ? '¡Invitación actualizada correctamente!' : '¡Invitación creada correctamente!'
     );
     resetInvitationForm();
     setTimeout(() => setFormFeedback(''), 3000);
   };
 
+  // ==================== GESTIÓN DE FAMILIAS ====================
   const handleCreateFamily = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFamilyName.trim()) return;
@@ -256,6 +612,7 @@ export const DashboardPage: React.FC = () => {
     setNewFamilyName('');
   };
 
+  // ==================== SETTINGS & CREDENCIALES ====================
   const handleSaveGlobalSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     await updateGlobalSettings({
@@ -276,42 +633,13 @@ export const DashboardPage: React.FC = () => {
     saveRuntimeFirebaseCredentials({
       apiKey: fbApiKey.trim(),
       projectId: fbProjectId.trim(),
-      authDomain:
-        fbAuthDomain.trim() || `${fbProjectId.trim()}.firebaseapp.com`,
+      authDomain: fbAuthDomain.trim() || `${fbProjectId.trim()}.firebaseapp.com`,
       appId: fbAppId.trim(),
     });
     window.location.reload();
   };
 
-  const buildInvitationUrl = (token: string) => {
-    return `${window.location.origin}/?t=${encodeURIComponent(token)}`;
-  };
-
-  const handleCopyLink = (inv: InvitationRecord) => {
-    const url = buildInvitationUrl(inv.token);
-    navigator.clipboard.writeText(url);
-    setCopiedId(inv.id);
-    setTimeout(() => setCopiedId(null), 2200);
-  };
-
-  const handleShareWhatsApp = (inv: InvitationRecord) => {
-    const url = buildInvitationUrl(inv.token);
-    const text = `✨ Hola *${inv.displayTitle}*, te compartimos tu invitación personal e interactiva para el Bautizo y Primer Cumpleaños de *${invitationConfig.protagonistName}*:\n\n👉 ${url}`;
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(text)}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
-  };
-
-  const filteredInvitations = useMemo(() => {
-    if (familyFilter === 'ALL') return invitations;
-    if (familyFilter === 'NONE')
-      return invitations.filter((i) => !i.familyGroupId);
-    return invitations.filter((i) => i.familyGroupId === familyFilter);
-  }, [invitations, familyFilter]);
-
-  // ==================== PIN LOCK SCREEN ====================
+  // ==================== PANTALLA DE BLOQUEO POR PIN ====================
   if (!unlocked) {
     return (
       <div className="dashboard-pin-screen">
@@ -325,9 +653,7 @@ export const DashboardPage: React.FC = () => {
           </p>
 
           <form onSubmit={handlePinSubmit} className="pin-form">
-            <label htmlFor="dashboard-pin-input">
-              Ingresa el PIN de seguridad
-            </label>
+            <label htmlFor="dashboard-pin-input">Ingresa el PIN de seguridad</label>
             <input
               id="dashboard-pin-input"
               type="password"
@@ -339,11 +665,7 @@ export const DashboardPage: React.FC = () => {
             />
             {pinError && <p className="pin-error-msg">{pinError}</p>}
 
-            <button
-              type="submit"
-              className="btn-start-journey"
-              disabled={verifyingPin}
-            >
+            <button type="submit" className="btn-start-journey" disabled={verifyingPin}>
               <Sparkles size={16} />
               <span>{verifyingPin ? 'Verificando...' : 'Ingresar al Panel'}</span>
             </button>
@@ -380,10 +702,9 @@ export const DashboardPage: React.FC = () => {
               }}
             >
               <strong>⚠️ Reglas de Firestore bloqueadas:</strong> Ve a Firebase
-              Console → <em>Firestore Database → Reglas</em> y cambia{' '}
-              <code>allow read, write: if false;</code> por{' '}
-              <code>allow read, write: if true;</code> para permitir crear el
-              PIN y guardar las invitaciones.
+              Console → <em>Firestore Database → Reglas</em> y actualiza las reglas
+              para permitir leer y escribir en <code>settings</code>, <code>families</code>,{' '}
+              <code>invitations</code> y <code>tables</code>.
             </div>
           )}
 
@@ -396,9 +717,8 @@ export const DashboardPage: React.FC = () => {
                 color: '#f3c677',
               }}
             >
-              ℹ️Ingresa con <strong>2026</strong> y ve a la pestaña{' '}
-              <strong>Parámetros y Firebase</strong> para vincular las
-              credenciales Web de tu proyecto Firestore.
+              ℹ️ Ingresa con <strong>2026</strong> y ve a la pestaña{' '}
+              <strong>Parámetros y Firebase</strong> para vincular tu Firestore.
             </small>
           )}
         </div>
@@ -406,7 +726,7 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
-  // ==================== UNLOCKED DASHBOARD ====================
+  // ==================== PANEL DESBLOQUEADO ====================
   return (
     <div className="dashboard-page">
       <header className="dashboard-topbar">
@@ -414,7 +734,7 @@ export const DashboardPage: React.FC = () => {
           <span className="dashboard-kicker">
             Administración • {invitationConfig.protagonistName}
           </span>
-          <h1>Gestión de Invitaciones y Familias</h1>
+          <h1>Panel de Invitados, Mesas y Asistencias</h1>
         </div>
 
         <div className="dashboard-topbar-actions">
@@ -427,7 +747,7 @@ export const DashboardPage: React.FC = () => {
             <span>
               {isFirebaseConnected()
                 ? 'Firebase Firestore Conectado'
-                : 'Modo Local / Demo (Configurable en Ajustes)'}
+                : 'Modo Local / Demo'}
             </span>
           </span>
 
@@ -445,15 +765,15 @@ export const DashboardPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Real-time KPI Metrics */}
+      {/* Real-time KPI Metrics Grid */}
       <section className="dashboard-stats-grid">
         <div className="stat-card">
-          <span>Invitaciones (Tokens)</span>
-          <strong>{stats.totalInvitations}</strong>
-          <small>{families.length} familias registradas</small>
+          <span>Total Personas Registradas</span>
+          <strong>{stats.totalPeople}</strong>
+          <small>{stats.totalInvitations} invitaciones / tokens</small>
         </div>
         <div className="stat-card is-attending">
-          <span>Total Confirmados (Asisten)</span>
+          <span>Confirmados que Asisten</span>
           <strong>{stats.attendingTotal}</strong>
           <small>
             {stats.attendingMembers} titulares + {stats.totalPlusOnesConfirmed}{' '}
@@ -476,12 +796,31 @@ export const DashboardPage: React.FC = () => {
       <nav className="dashboard-tabs">
         <button
           type="button"
+          className={activeTab === 'guests' ? 'is-active' : ''}
+          onClick={() => setActiveTab('guests')}
+        >
+          <ClipboardList size={16} />
+          <span>Lista General de Invitados ({flattenedGuests.length})</span>
+        </button>
+
+        <button
+          type="button"
+          className={activeTab === 'tables' ? 'is-active' : ''}
+          onClick={() => setActiveTab('tables')}
+        >
+          <Table size={16} />
+          <span>Mesas y Asientos ({tables.length})</span>
+        </button>
+
+        <button
+          type="button"
           className={activeTab === 'invitations' ? 'is-active' : ''}
           onClick={() => setActiveTab('invitations')}
         >
           <UserPlus size={16} />
-          <span>Invitaciones ({invitations.length})</span>
+          <span>Invitaciones / Tokens ({invitations.length})</span>
         </button>
+
         <button
           type="button"
           className={activeTab === 'families' ? 'is-active' : ''}
@@ -490,28 +829,729 @@ export const DashboardPage: React.FC = () => {
           <Users size={16} />
           <span>Grupos Familiares ({families.length})</span>
         </button>
+
         <button
           type="button"
           className={activeTab === 'settings' ? 'is-active' : ''}
           onClick={() => setActiveTab('settings')}
         >
           <Settings size={16} />
-          <span>Fecha Límite, PIN y Firebase</span>
+          <span>Parámetros y Firebase</span>
         </button>
       </nav>
 
-      {/* ==================== TAB 1: INVITATIONS ==================== */}
+      {/* ============================================================ */}
+      {/* ==================== TAB 1: LISTA GENERAL =================== */}
+      {/* ============================================================ */}
+      {activeTab === 'guests' && (
+        <section className="dashboard-panel">
+          <div className="guests-overview-header">
+            <div>
+              <h2>Lista General de Invitados</h2>
+              <p className="panel-helper" style={{ marginBottom: 0 }}>
+                Control detallado de cada persona, estado de confirmación, número de WhatsApp y asignación de mesa.
+              </p>
+            </div>
+
+            <div className="view-mode-toggle">
+              <button
+                type="button"
+                className={guestViewMode === 'by-person' ? 'is-active' : ''}
+                onClick={() => setGuestViewMode('by-person')}
+              >
+                Por Persona ({flattenedGuests.length})
+              </button>
+              <button
+                type="button"
+                className={guestViewMode === 'by-invitation' ? 'is-active' : ''}
+                onClick={() => setGuestViewMode('by-invitation')}
+              >
+                Por Invitación ({invitations.length})
+              </button>
+            </div>
+          </div>
+
+          {/* KPI Pills de estado de mesas y confirmaciones */}
+          <div className="guests-kpi-bar">
+            <span className="guest-kpi-pill is-attending">
+              <CheckCircle2 size={14} />
+              <span>Asisten:</span> <strong>{stats.attendingTotal}</strong>
+            </span>
+            <span className="guest-kpi-pill is-declined">
+              <XCircle size={14} />
+              <span>No Asisten:</span> <strong>{stats.declinedMembers}</strong>
+            </span>
+            <span className="guest-kpi-pill is-pending">
+              <Clock size={14} />
+              <span>Pendientes:</span> <strong>{stats.pendingMembers}</strong>
+            </span>
+            <span className="guest-kpi-pill is-tabled">
+              <Table size={14} />
+              <span>Con Mesa Asignada:</span> <strong>{stats.attendingWithTable}</strong>
+            </span>
+            {stats.attendingWithoutTable > 0 && (
+              <span className="guest-kpi-pill" style={{ background: '#fff0d6', borderColor: '#e4b66f', color: '#885305' }}>
+                <AlertTriangle size={14} />
+                <span>Asisten sin mesa:</span> <strong>{stats.attendingWithoutTable}</strong>
+              </span>
+            )}
+          </div>
+
+          {/* Barra de Filtros y Búsqueda */}
+          <div className="guests-toolbar">
+            <div className="guests-search-box">
+              <Search size={16} />
+              <input
+                type="text"
+                placeholder="Buscar por nombre, familia, teléfono..."
+                value={guestSearch}
+                onChange={(e) => setGuestSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="guests-filter-group">
+              <select
+                value={guestStatusFilter}
+                onChange={(e) =>
+                  setGuestStatusFilter(
+                    e.target.value as 'ALL' | 'attending' | 'declined' | 'pending'
+                  )
+                }
+              >
+                <option value="ALL">Todos los estados</option>
+                <option value="attending">✓ Solo confirmados (Asisten)</option>
+                <option value="declined">✕ Solo confirmados (No asisten)</option>
+                <option value="pending">⏳ Solo pendientes</option>
+              </select>
+
+              <select
+                value={guestTableFilter}
+                onChange={(e) => setGuestTableFilter(e.target.value)}
+              >
+                <option value="ALL">Todas las mesas</option>
+                <option value="WITH_TABLE">Con mesa asignada</option>
+                <option value="WITHOUT_TABLE">Sin mesa asignada</option>
+                {tables.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={guestFamilyFilter}
+                onChange={(e) => setGuestFamilyFilter(e.target.value)}
+              >
+                <option value="ALL">Todas las familias</option>
+                <option value="NONE">Solo individuales sin familia</option>
+                {families.map((fam) => (
+                  <option key={fam.id} value={fam.id}>
+                    {fam.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* VISTA 1: POR PERSONA (LISTA NOMINAL) */}
+          {guestViewMode === 'by-person' && (
+            <div className="guests-table-wrapper">
+              <table className="guests-table">
+                <thead>
+                  <tr>
+                    <th>Persona / Invitado</th>
+                    <th>Familia / Grupo</th>
+                    <th>Estado</th>
+                    <th>Teléfono / WhatsApp</th>
+                    <th>Mesa Asignada</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredGuests.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '30px' }}>
+                        No se encontraron invitados con los filtros seleccionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredGuests.map((guest) => {
+                      const inv = invitations.find((i) => i.id === guest.invitationId);
+                      const currentTable = tables.find((t) => t.id === guest.tableId);
+                      const isEditingPhone = quickPhoneInvId === guest.invitationId;
+
+                      return (
+                        <tr key={guest.uniqueId}>
+                          {/* Nombre del invitado */}
+                          <td>
+                            <div className="guest-name-cell">
+                              <span className="guest-primary-name">{guest.name}</span>
+                              <span className="guest-inv-source">
+                                Invitación: <em>{guest.invitationTitle}</em>
+                              </span>
+                              {guest.isPlusOne && (
+                                <span className="badge-tag-companion">Acompañante (+1)</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Familia */}
+                          <td>
+                            {guest.familyName ? (
+                              <span className="badge-family">{guest.familyName}</span>
+                            ) : (
+                              <span className="badge-individual">Individual</span>
+                            )}
+                          </td>
+
+                          {/* Estado de confirmación */}
+                          <td>
+                            <span className={`status-tag is-${guest.status}`}>
+                              {guest.status === 'attending'
+                                ? '✓ Asiste'
+                                : guest.status === 'declined'
+                                ? '✕ No asiste'
+                                : '⏳ Pendiente'}
+                            </span>
+                          </td>
+
+                          {/* Teléfono / WhatsApp */}
+                          <td>
+                            {isEditingPhone ? (
+                              <div className="phone-quick-edit-row">
+                                <input
+                                  type="tel"
+                                  className="phone-quick-input"
+                                  placeholder="+502 1234 5678"
+                                  value={quickPhoneValue}
+                                  onChange={(e) => setQuickPhoneValue(e.target.value)}
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  className="btn-icon-save"
+                                  onClick={() => handleSaveQuickPhone(guest.invitationId)}
+                                  title="Guardar teléfono"
+                                >
+                                  <Check size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-icon-cancel"
+                                  onClick={() => setQuickPhoneInvId(null)}
+                                  title="Cancelar"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : guest.phone ? (
+                              <div className="guest-phone-cell">
+                                <span style={{ fontWeight: 600 }}>{guest.phone}</span>
+                                {inv && (
+                                  <button
+                                    type="button"
+                                    className="btn-wa-direct"
+                                    onClick={() => handleShareWhatsApp(inv)}
+                                    title="Enviar invitación por WhatsApp"
+                                  >
+                                    <MessageCircle size={13} />
+                                    <span>WhatsApp</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#826e4f' }}
+                                  onClick={() => {
+                                    setQuickPhoneInvId(guest.invitationId);
+                                    setQuickPhoneValue(guest.phone || '');
+                                  }}
+                                  title="Editar teléfono"
+                                >
+                                  <Edit3 size={13} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn-add-phone-quick"
+                                onClick={() => {
+                                  setQuickPhoneInvId(guest.invitationId);
+                                  setQuickPhoneValue('');
+                                }}
+                              >
+                                <Plus size={11} /> Agregar teléfono
+                              </button>
+                            )}
+                          </td>
+
+                          {/* Mesa asignada con selector rápido */}
+                          <td>
+                            <select
+                              className={`table-quick-select ${
+                                !guest.tableId ? 'is-empty' : ''
+                              }`}
+                              value={guest.tableId || ''}
+                              onChange={(e) =>
+                                handleQuickAssignTable(
+                                  guest.invitationId,
+                                  e.target.value || null
+                                )
+                              }
+                            >
+                              <option value="">(Sin mesa asignada)</option>
+                              {tables.map((tbl) => {
+                                const occ = calculateTableOccupancy(
+                                  tbl.id,
+                                  tbl.capacity,
+                                  invitations
+                                );
+                                const isCurrent = tbl.id === guest.tableId;
+                                const isFull =
+                                  !isCurrent && occ.confirmedCount >= tbl.capacity;
+                                return (
+                                  <option key={tbl.id} value={tbl.id}>
+                                    {tbl.name} ({occ.confirmedCount}/{tbl.capacity}
+                                    {isFull ? ' - LLENA' : ''})
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </td>
+
+                          {/* Acciones */}
+                          <td>
+                            {inv && (
+                              <div style={{ display: 'flex', gap: '5px' }}>
+                                <button
+                                  type="button"
+                                  className="btn-card-small"
+                                  onClick={() => handleCopyLink(inv)}
+                                  title="Copiar enlace con token"
+                                >
+                                  {copiedId === inv.id ? <Check size={13} /> : <Copy size={13} />}
+                                </button>
+                                <a
+                                  href={buildInvitationUrl(inv.token)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="btn-card-small"
+                                  title="Abrir invitación"
+                                >
+                                  <ExternalLink size={13} />
+                                </a>
+                                <button
+                                  type="button"
+                                  className="btn-card-small"
+                                  onClick={() => handleLoadInvitationForEdit(inv)}
+                                  title="Editar invitación"
+                                >
+                                  <Edit3 size={13} />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* VISTA 2: POR INVITACIÓN (GRUPOS) */}
+          {guestViewMode === 'by-invitation' && (
+            <div className="guests-table-wrapper">
+              <table className="guests-table">
+                <thead>
+                  <tr>
+                    <th>Invitación</th>
+                    <th>Titulares y Acompañantes</th>
+                    <th>Teléfono / WhatsApp</th>
+                    <th>Mesa Asignada</th>
+                    <th>Token</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invitations.map((inv) => {
+                    const famName = families.find((f) => f.id === inv.familyGroupId)?.name;
+                    return (
+                      <tr key={inv.id}>
+                        <td>
+                          <div className="guest-name-cell">
+                            <span className="guest-primary-name">{inv.displayTitle}</span>
+                            {famName && <span className="badge-family">{famName}</span>}
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {inv.members.map((m) => (
+                              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>{m.name}</span>
+                                <span className={`status-tag is-${m.status}`} style={{ fontSize: '0.7rem' }}>
+                                  {m.status === 'attending'
+                                    ? '✓ Asiste'
+                                    : m.status === 'declined'
+                                    ? '✕ No'
+                                    : '⏳'}
+                                </span>
+                              </div>
+                            ))}
+                            {inv.selectedPlusOnesCount > 0 && inv.plusOneNames.length > 0 && (
+                              <small style={{ color: '#7a5513' }}>
+                                <strong>+ {inv.selectedPlusOnesCount} acompañantes:</strong>{' '}
+                                {inv.plusOneNames.join(', ')}
+                              </small>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="guest-phone-cell">
+                            {inv.phone ? (
+                              <>
+                                <span>{inv.phone}</span>
+                                <button
+                                  type="button"
+                                  className="btn-wa-direct"
+                                  onClick={() => handleShareWhatsApp(inv)}
+                                >
+                                  <MessageCircle size={13} />
+                                  <span>WhatsApp</span>
+                                </button>
+                              </>
+                            ) : (
+                              <span style={{ color: '#9d8866', fontStyle: 'italic', fontSize: '0.78rem' }}>
+                                Sin teléfono
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <select
+                            className={`table-quick-select ${!inv.tableId ? 'is-empty' : ''}`}
+                            value={inv.tableId || ''}
+                            onChange={(e) =>
+                              handleQuickAssignTable(inv.id, e.target.value || null)
+                            }
+                          >
+                            <option value="">(Sin mesa asignada)</option>
+                            {tables.map((tbl) => {
+                              const occ = calculateTableOccupancy(tbl.id, tbl.capacity, invitations);
+                              return (
+                                <option key={tbl.id} value={tbl.id}>
+                                  {tbl.name} ({occ.confirmedCount}/{tbl.capacity})
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </td>
+                        <td>
+                          <code className="badge-token">?t={inv.token}</code>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '5px' }}>
+                            <button
+                              type="button"
+                              className="btn-card-small"
+                              onClick={() => handleCopyLink(inv)}
+                              title="Copiar link"
+                            >
+                              <Copy size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-card-small"
+                              onClick={() => handleLoadInvitationForEdit(inv)}
+                              title="Editar"
+                            >
+                              <Edit3 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ============================================================ */}
+      {/* ==================== TAB 2: MESAS Y ASIENTOS ================ */}
+      {/* ============================================================ */}
+      {activeTab === 'tables' && (
+        <div className="tables-management-layout">
+          {/* Métricas Generales de Mesas */}
+          <div className="tables-summary-grid">
+            <div className="table-kpi-card">
+              <span>Mesas Creadas</span>
+              <strong>{tableMetrics.totalTables}</strong>
+              <small>Capacidad total: {tableMetrics.totalSalonCapacity} personas</small>
+            </div>
+            <div className="table-kpi-card" style={{ borderLeft: '4px solid #38a169' }}>
+              <span>Asientos Ocupados</span>
+              <strong style={{ color: '#1f663c' }}>{tableMetrics.totalSeatsOccupied}</strong>
+              <small>Personas confirmadas asignadas</small>
+            </div>
+            <div className="table-kpi-card" style={{ borderLeft: '4px solid #3182ce' }}>
+              <span>Asientos Libres</span>
+              <strong style={{ color: '#1a4971' }}>{tableMetrics.totalSeatsAvailable}</strong>
+              <small>Disponibles para asignar</small>
+            </div>
+            <div className="table-kpi-card" style={{ borderLeft: '4px solid #dd6b20' }}>
+              <span>Mesas Llenas</span>
+              <strong>{tableMetrics.fullTablesCount}</strong>
+              <small>
+                {tableMetrics.overcapacityTablesCount > 0
+                  ? `⚠️ ${tableMetrics.overcapacityTablesCount} con sobrecupo`
+                  : 'Sin sobrecupos'}
+              </small>
+            </div>
+          </div>
+
+          <div className="dashboard-content-columns">
+            {/* Columna Izquierda: Formulario Crear / Editar Mesa */}
+            <section className="dashboard-panel">
+              <h2>{editingTableId ? 'Editar Mesa' : 'Agregar Nueva Mesa'}</h2>
+              <p className="panel-helper">
+                Define el nombre o número de la mesa y la cantidad máxima de personas permitidas para evitar sobrecupos.
+              </p>
+
+              <form onSubmit={handleSaveTable} className="dashboard-form">
+                <div className="form-group">
+                  <label>Nombre o Número de Mesa</label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Mesa 1, Mesa de Honor o Mesa Familia García"
+                    value={tableName}
+                    onChange={(e) => setTableName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-row-2">
+                  <div className="form-group">
+                    <label>Capacidad máxima (personas)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={tableCapacity}
+                      onChange={(e) => setTableCapacity(Math.max(1, Number(e.target.value)))}
+                      required
+                    />
+                    <small style={{ color: '#7a6544' }}>Cantidad de sillas/personas</small>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Atajos de capacidad</label>
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                      {[6, 8, 10, 12].map((cap) => (
+                        <button
+                          key={cap}
+                          type="button"
+                          className="btn-card-small"
+                          onClick={() => setTableCapacity(cap)}
+                          style={{
+                            fontWeight: tableCapacity === cap ? 800 : 500,
+                            borderColor: tableCapacity === cap ? '#2b2111' : '#cfbe9e',
+                          }}
+                        >
+                          {cap} pers.
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Notas de ubicación (opcional)</label>
+                  <input
+                    type="text"
+                    placeholder="Ej. Cerca de la pista, Frente al jardín"
+                    value={tableNotes}
+                    onChange={(e) => setTableNotes(e.target.value)}
+                  />
+                </div>
+
+                {tableFormFeedback && (
+                  <div className="form-feedback-banner">{tableFormFeedback}</div>
+                )}
+
+                <div className="form-actions">
+                  {editingTableId && (
+                    <button
+                      type="button"
+                      className="btn-secondary-journey"
+                      onClick={resetTableForm}
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                  <button type="submit" className="btn-start-journey">
+                    <Plus size={16} />
+                    <span>{editingTableId ? 'Guardar Cambios' : 'Crear Mesa'}</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            {/* Columna Derecha: Tarjetas de Mesas */}
+            <section className="dashboard-panel">
+              <div className="panel-header-with-filter">
+                <h2>Mesas del Evento ({tables.length})</h2>
+              </div>
+
+              {tables.length === 0 ? (
+                <div className="empty-state-notice">
+                  <Table size={36} style={{ margin: '0 auto 10px', color: '#bca680' }} />
+                  <h4>No hay mesas registradas aún</h4>
+                  <p>Crea tu primera mesa en el formulario de la izquierda (ej. Mesa 1 con 8 o 10 personas).</p>
+                </div>
+              ) : (
+                <div className="tables-cards-grid">
+                  {tables.map((tbl) => {
+                    const occ = calculateTableOccupancy(tbl.id, tbl.capacity, invitations);
+                    const pct = Math.min(100, Math.round((occ.confirmedCount / tbl.capacity) * 100));
+
+                    let meterColor = 'is-green';
+                    let tagClass = 'is-green';
+                    if (occ.isOverCapacity) {
+                      meterColor = 'is-red';
+                      tagClass = 'is-red';
+                    } else if (occ.confirmedCount >= tbl.capacity) {
+                      meterColor = 'is-full';
+                      tagClass = 'is-full';
+                    } else if (pct >= 75) {
+                      meterColor = 'is-yellow';
+                      tagClass = 'is-yellow';
+                    }
+
+                    return (
+                      <div
+                        key={tbl.id}
+                        className={`table-card ${occ.isOverCapacity ? 'is-overcap' : ''}`}
+                      >
+                        <div className="table-card-top">
+                          <div>
+                            <h3>{tbl.name}</h3>
+                            {tbl.notes && <p className="table-card-notes">{tbl.notes}</p>}
+                          </div>
+
+                          <span className={`table-capacity-tag ${tagClass}`}>
+                            {occ.confirmedCount} / {tbl.capacity} pers.
+                          </span>
+                        </div>
+
+                        {/* Barra de Ocupación Visual */}
+                        <div className="table-meter-container">
+                          <div className="table-meter-bar">
+                            <div
+                              className={`table-meter-fill ${meterColor}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <div className="table-meter-labels">
+                            <span>
+                              {occ.confirmedCount} confirmados ({occ.expectedCount} previstos)
+                            </span>
+                            <span>
+                              {occ.isOverCapacity
+                                ? `⚠️ Sobrecupo (+${occ.confirmedCount - tbl.capacity})`
+                                : `${occ.availableSeats} libres`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {occ.isOverCapacity && (
+                          <div className="table-overcap-alert">
+                            <AlertTriangle size={14} />
+                            <span>¡Esta mesa supera su capacidad máxima!</span>
+                          </div>
+                        )}
+
+                        {/* Lista de Invitados Sentados */}
+                        <div style={{ marginTop: '4px' }}>
+                          <span
+                            style={{
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              color: '#6e5833',
+                              letterSpacing: '0.04em',
+                            }}
+                          >
+                            Invitados Asignados ({occ.memberNames.length}):
+                          </span>
+
+                          <div className="table-guests-chips" style={{ marginTop: '5px' }}>
+                            {occ.memberNames.length === 0 ? (
+                              <small style={{ color: '#97825f', fontStyle: 'italic' }}>
+                                Ninguna persona asignada todavía.
+                              </small>
+                            ) : (
+                              occ.memberNames.map((g, idx) => (
+                                <div key={idx} className="table-guest-item-row">
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span className="table-guest-item-name">{g.name}</span>
+                                    <small>{g.invitationTitle}</small>
+                                  </div>
+                                  <span
+                                    className={`status-tag is-${g.status}`}
+                                    style={{ fontSize: '0.68rem', padding: '1px 6px' }}
+                                  >
+                                    {g.status === 'attending'
+                                      ? '✓ Asiste'
+                                      : g.status === 'declined'
+                                      ? '✕ No'
+                                      : '⏳'}
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Botones de acción */}
+                        <div className="table-card-actions">
+                          <button
+                            type="button"
+                            className="btn-card-small"
+                            onClick={() => handleEditTable(tbl)}
+                          >
+                            <Edit3 size={13} /> Editar
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-card-small is-danger"
+                            onClick={() => handleDeleteTable(tbl)}
+                          >
+                            <Trash2 size={13} /> Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* ==================== TAB 3: INVITACIONES (TOKENS) =========== */}
+      {/* ============================================================ */}
       {activeTab === 'invitations' && (
         <div className="dashboard-content-columns">
-          {/* Left Column: Create / Edit Invitation Form */}
+          {/* Columna Izquierda: Formulario Crear / Editar Invitación */}
           <section className="dashboard-panel">
-            <h2>
-              {editingId ? 'Editar Invitación' : 'Nueva Invitación con Token'}
-            </h2>
+            <h2>{editingId ? 'Editar Invitación' : 'Nueva Invitación con Token'}</h2>
             <p className="panel-helper">
-              Para papás/esposos pon el título (ej.{' '}
-              <em>Esposos Picapiedra</em>) y agrega los nombres de ambos para
-              que cada uno confirme su asistencia individual.
+              Crea invitaciones individuales o por pareja (ej. <em>Esposos Picapiedra</em> con Juan y María para selección individual), asigna acompañantes permitidos (+1/+2/+3), teléfono para WhatsApp y mesa del evento.
             </p>
 
             <form onSubmit={handleSaveInvitation} className="dashboard-form">
@@ -519,11 +1559,46 @@ export const DashboardPage: React.FC = () => {
                 <label>Título que dirá la invitación</label>
                 <input
                   type="text"
-                  placeholder="Ej. Esposos Picapiedra o Pedro Picapiedra"
+                  placeholder="Ej. Esposos Picapiedra o Mateo Picapiedra"
                   value={displayTitle}
                   onChange={(e) => setDisplayTitle(e.target.value)}
                   required
                 />
+              </div>
+
+              <div className="form-row-2">
+                <div className="form-group">
+                  <label>
+                    <Phone size={14} /> Teléfono / WhatsApp de contacto
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="Ej. +502 5555 1234"
+                    value={invPhone}
+                    onChange={(e) => setInvPhone(e.target.value)}
+                  />
+                  <small style={{ color: '#7a6544' }}>Para compartirle directamente por WhatsApp</small>
+                </div>
+
+                <div className="form-group">
+                  <label>
+                    <Table size={14} /> Mesa asignada para el evento
+                  </label>
+                  <select
+                    value={invTableId}
+                    onChange={(e) => setInvTableId(e.target.value)}
+                  >
+                    <option value="">(Sin mesa asignada por ahora)</option>
+                    {tables.map((t) => {
+                      const occ = calculateTableOccupancy(t.id, t.capacity, invitations.filter((i) => i.id !== editingId));
+                      return (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({occ.confirmedCount}/{t.capacity} pers. - {occ.availableSeats} libres)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
               </div>
 
               <div className="form-row-2">
@@ -550,9 +1625,7 @@ export const DashboardPage: React.FC = () => {
                       setMaxPlusOnes(Number(e.target.value) as 0 | 1 | 2 | 3)
                     }
                   >
-                    <option value={0}>
-                      Sin acompañantes (+0, solo titulares)
-                    </option>
+                    <option value={0}>Sin acompañantes (+0, solo titulares)</option>
                     <option value={1}>Permitir +1 acompañante</option>
                     <option value={2}>Permitir hasta +2 acompañantes</option>
                     <option value={3}>Permitir hasta +3 acompañantes</option>
@@ -560,11 +1633,10 @@ export const DashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Members List inside this single invitation */}
+              {/* Lista de Personas Titulares en esta Invitación */}
               <div className="form-group">
                 <label>
-                  Nombres de las personas en esta invitación (selección
-                  individual)
+                  Nombres de las personas en esta invitación (selección individual)
                 </label>
                 <div className="members-inputs-stack">
                   {memberNames.map((name, idx) => (
@@ -587,9 +1659,7 @@ export const DashboardPage: React.FC = () => {
                           type="button"
                           className="btn-icon-danger"
                           onClick={() =>
-                            setMemberNames(
-                              memberNames.filter((_, i) => i !== idx)
-                            )
+                            setMemberNames(memberNames.filter((_, i) => i !== idx))
                           }
                           title="Quitar persona"
                         >
@@ -606,8 +1676,7 @@ export const DashboardPage: React.FC = () => {
                 >
                   <Plus size={14} />
                   <span>
-                    Agregar otra persona titular a esta misma invitación (ej.
-                    Esposa/Esposo)
+                    Agregar otra persona titular a esta misma invitación (ej. Esposa/Esposo)
                   </span>
                 </button>
               </div>
@@ -638,38 +1707,23 @@ export const DashboardPage: React.FC = () => {
                 )}
                 <button type="submit" className="btn-start-journey">
                   <Plus size={16} />
-                  <span>
-                    {editingId ? 'Guardar cambios' : 'Crear invitación'}
-                  </span>
+                  <span>{editingId ? 'Guardar cambios' : 'Crear invitación'}</span>
                 </button>
               </div>
             </form>
           </section>
 
-          {/* Right Column: Invitations List */}
+          {/* Columna Derecha: Tarjetas de Invitaciones */}
           <section className="dashboard-panel">
             <div className="panel-header-with-filter">
               <h2>Invitaciones Generadas</h2>
-              <select
-                value={familyFilter}
-                onChange={(e) => setFamilyFilter(e.target.value)}
-                className="family-filter-select"
-              >
-                <option value="ALL">Todas las familias e individuales</option>
-                <option value="NONE">Solo individuales sin familia</option>
-                {families.map((fam) => (
-                  <option key={fam.id} value={fam.id}>
-                    {fam.name}
-                  </option>
-                ))}
-              </select>
             </div>
 
             <div className="invitations-cards-list">
-              {filteredInvitations.map((inv) => {
-                const famName = families.find(
-                  (f) => f.id === inv.familyGroupId
-                )?.name;
+              {invitations.map((inv) => {
+                const famName = families.find((f) => f.id === inv.familyGroupId)?.name;
+                const assignedTable = tables.find((t) => t.id === inv.tableId);
+
                 return (
                   <article key={inv.id} className="inv-admin-card">
                     <div className="inv-admin-card-top">
@@ -680,14 +1734,33 @@ export const DashboardPage: React.FC = () => {
                           ) : (
                             <span className="badge-individual">Individual</span>
                           )}
+
                           <span className="badge-plus">
                             {inv.maxPlusOnes > 0
                               ? `Habilitado +${inv.maxPlusOnes}`
                               : 'Sin +1'}
                           </span>
+
+                          {assignedTable ? (
+                            <span className="badge-table" style={{ background: '#eaf2fd', color: '#1a4b81', borderRadius: '999px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>
+                              🪑 {assignedTable.name}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.68rem', color: '#97825f', padding: '2px 4px' }}>
+                              Sin mesa
+                            </span>
+                          )}
+
                           <code className="badge-token">?t={inv.token}</code>
                         </div>
+
                         <h3>{inv.displayTitle}</h3>
+
+                        {inv.phone && (
+                          <small style={{ color: '#5a4628', fontWeight: 600 }}>
+                            📱 Teléfono: {inv.phone}
+                          </small>
+                        )}
                       </div>
 
                       <div className="inv-card-icon-actions">
@@ -700,7 +1773,11 @@ export const DashboardPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteInvitationRecord(inv.id)}
+                          onClick={() => {
+                            if (window.confirm(`¿Eliminar la invitación "${inv.displayTitle}"?`)) {
+                              deleteInvitationRecord(inv.id);
+                            }
+                          }}
                           title="Eliminar invitación"
                         >
                           <Trash2 size={15} />
@@ -708,7 +1785,7 @@ export const DashboardPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Individual Member Statuses */}
+                    {/* Estado individual de miembros */}
                     <div className="inv-members-status-list">
                       {inv.members.map((m) => (
                         <div key={m.id} className="member-status-pill-row">
@@ -717,26 +1794,24 @@ export const DashboardPage: React.FC = () => {
                             {m.status === 'attending'
                               ? '✓ Sí asiste'
                               : m.status === 'declined'
-                                ? '✕ No asiste'
-                                : '⏳ Pendiente'}
+                              ? '✕ No asiste'
+                              : '⏳ Pendiente'}
                           </span>
                         </div>
                       ))}
 
-                      {/* Plus-One Companions if selected */}
-                      {inv.selectedPlusOnesCount > 0 &&
-                        inv.plusOneNames.length > 0 && (
-                          <div className="plus-ones-summary">
-                            <strong>
-                              Acompañantes confirmados (+
-                              {inv.selectedPlusOnesCount}):
-                            </strong>{' '}
-                            {inv.plusOneNames.join(', ')}
-                          </div>
-                        )}
+                      {/* Acompañantes seleccionados */}
+                      {inv.selectedPlusOnesCount > 0 && inv.plusOneNames.length > 0 && (
+                        <div className="plus-ones-summary">
+                          <strong>
+                            Acompañantes confirmados (+{inv.selectedPlusOnesCount}):
+                          </strong>{' '}
+                          {inv.plusOneNames.join(', ')}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Share & Preview Buttons */}
+                    {/* Botones de acción */}
                     <div className="inv-share-actions-row">
                       <button
                         type="button"
@@ -783,7 +1858,9 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* ==================== TAB 2: FAMILY GROUPS ==================== */}
+      {/* ============================================================ */}
+      {/* ==================== TAB 4: GRUPOS FAMILIARES =============== */}
+      {/* ============================================================ */}
       {activeTab === 'families' && (
         <section className="dashboard-panel">
           <h2>Grupos Familiares</h2>
@@ -809,21 +1886,21 @@ export const DashboardPage: React.FC = () => {
 
           <div className="families-list-grid">
             {families.map((fam) => {
-              const famInvs = invitations.filter(
-                (i) => i.familyGroupId === fam.id
-              );
+              const famInvs = invitations.filter((i) => i.familyGroupId === fam.id);
               return (
                 <div key={fam.id} className="family-admin-card">
                   <div>
                     <h3>{fam.name}</h3>
-                    <small>
-                      {famInvs.length} invitaciones vinculadas a esta familia
-                    </small>
+                    <small>{famInvs.length} invitaciones vinculadas a esta familia</small>
                   </div>
                   <button
                     type="button"
                     className="btn-icon-danger"
-                    onClick={() => deleteFamilyGroup(fam.id)}
+                    onClick={() => {
+                      if (window.confirm(`¿Eliminar el grupo familiar "${fam.name}"?`)) {
+                        deleteFamilyGroup(fam.id);
+                      }
+                    }}
                     title="Eliminar grupo familiar"
                   >
                     <Trash2 size={16} />
@@ -835,7 +1912,9 @@ export const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {/* ==================== TAB 3: SETTINGS & FIREBASE ==================== */}
+      {/* ============================================================ */}
+      {/* ==================== TAB 5: PARÁMETROS Y FIREBASE =========== */}
+      {/* ============================================================ */}
       {activeTab === 'settings' && (
         <div className="dashboard-content-columns">
           <section className="dashboard-panel">
@@ -843,8 +1922,7 @@ export const DashboardPage: React.FC = () => {
             <form onSubmit={handleSaveGlobalSettings} className="dashboard-form">
               <div className="form-group">
                 <label>
-                  <Calendar size={15} /> Fecha y hora límite para modificar
-                  invitaciones
+                  <Calendar size={15} /> Fecha y hora límite para modificar invitaciones
                 </label>
                 <input
                   type="datetime-local"
@@ -853,15 +1931,13 @@ export const DashboardPage: React.FC = () => {
                   required
                 />
                 <small>
-                  Los invitados podrán entrar a su token y cambiar su
-                  confirmación hasta esta fecha.
+                  Los invitados podrán entrar a su token y cambiar su confirmación hasta esta fecha.
                 </small>
               </div>
 
               <div className="form-group">
                 <label>
-                  <Lock size={15} /> PIN de acceso a /mi_dashboard (guardado en
-                  Firebase)
+                  <Lock size={15} /> PIN de acceso a /mi_dashboard (guardado en Firebase)
                 </label>
                 <input
                   type="text"
@@ -882,24 +1958,20 @@ export const DashboardPage: React.FC = () => {
 
             <hr className="panel-divider" />
 
-            <h3>Datos de Ejemplo (Familia Picapiedra)</h3>
+            <h3>Datos de Ejemplo (Familia Picapiedra y Mesas)</h3>
             <p className="panel-helper">
               Restaura o sube a Firebase el ejemplo completo de la{' '}
-              <strong>Familia Picapiedra</strong> (4 invitaciones: Esposos
-              Picapiedra con Juan y María + 3 hijos + 1 invitado individual con
-              +3).
+              <strong>Familia Picapiedra</strong> con mesas asignadas, números de WhatsApp y acompañantes.
             </p>
             <button
               type="button"
               className="btn-secondary-journey"
               onClick={async () => {
                 await seedPicapiedraExampleToDatabase();
-                alert(
-                  '¡Ejemplo de la Familia Picapiedra cargado en la base de datos!'
-                );
+                alert('¡Datos de demostración y mesas cargados en la base de datos!');
               }}
             >
-              Cargar ejemplo Familia Picapiedra
+              Cargar ejemplo Familia Picapiedra y Mesas
             </button>
           </section>
 
@@ -907,8 +1979,7 @@ export const DashboardPage: React.FC = () => {
             <h2>Conexión a Firebase (Cloud Firestore)</h2>
             <p className="panel-helper">
               Puedes colocar tus credenciales en el archivo <code>.env</code>{' '}
-              (variables <code>VITE_FIREBASE_*</code>) o pegarlas directamente
-              aquí para conectar este navegador a tu proyecto de Firebase:
+              (variables <code>VITE_FIREBASE_*</code>) o pegarlas directamente aquí:
             </p>
 
             <form onSubmit={handleSaveFirebaseCreds} className="dashboard-form">
