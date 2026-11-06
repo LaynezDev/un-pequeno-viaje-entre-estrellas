@@ -17,6 +17,8 @@ export interface InvitationMember {
   id: string;
   name: string;
   status: AttendanceStatus;
+  /** Teléfono o WhatsApp específico de esta persona */
+  phone?: string;
 }
 
 export interface FamilyGroup {
@@ -48,6 +50,8 @@ export interface InvitationRecord {
   selectedPlusOnesCount: number;
   /** Nombres obligatorios de cada acompañante seleccionado */
   plusOneNames: string[];
+  /** Teléfonos opcionales de los acompañantes (+1, +2, +3) */
+  companionPhones?: string[];
   /** Mensaje opcional para Christopher Gabriel */
   notes?: string;
   /** Número de teléfono / WhatsApp del contacto de la invitación */
@@ -144,8 +148,8 @@ function getInitialDemoSeed(): {
       displayTitle: 'Esposos Picapiedra',
       familyGroupId: familyId,
       members: [
-        { id: 'm-juan', name: 'Juan Picapiedra', status: 'declined' },
-        { id: 'm-maria', name: 'María Picapiedra', status: 'attending' },
+        { id: 'm-juan', name: 'Juan Picapiedra', status: 'declined', phone: '+502 5555 1234' },
+        { id: 'm-maria', name: 'María Picapiedra', status: 'attending', phone: '+502 5555 1235' },
       ],
       maxPlusOnes: 0,
       selectedPlusOnesCount: 0,
@@ -162,11 +166,12 @@ function getInitialDemoSeed(): {
       displayTitle: 'Pedro Picapiedra (Hijo)',
       familyGroupId: familyId,
       members: [
-        { id: 'm-pedro', name: 'Pedro Picapiedra', status: 'attending' },
+        { id: 'm-pedro', name: 'Pedro Picapiedra', status: 'attending', phone: '+502 5555 5678' },
       ],
       maxPlusOnes: 1,
       selectedPlusOnesCount: 1,
       plusOneNames: ['Vilma de Picapiedra'],
+      companionPhones: ['+502 5555 5679'],
       notes: '',
       phone: '+502 5555 5678',
       tableId: 'tbl-1',
@@ -179,7 +184,7 @@ function getInitialDemoSeed(): {
       displayTitle: 'Pebbles Picapiedra (Hija)',
       familyGroupId: familyId,
       members: [
-        { id: 'm-pebbles', name: 'Pebbles Picapiedra', status: 'pending' },
+        { id: 'm-pebbles', name: 'Pebbles Picapiedra', status: 'pending', phone: '+502 5555 9012' },
       ],
       maxPlusOnes: 0,
       selectedPlusOnesCount: 0,
@@ -196,7 +201,7 @@ function getInitialDemoSeed(): {
       displayTitle: 'Mateo Picapiedra (Hijo)',
       familyGroupId: familyId,
       members: [
-        { id: 'm-mateo', name: 'Mateo Picapiedra', status: 'pending' },
+        { id: 'm-mateo', name: 'Mateo Picapiedra', status: 'pending', phone: '+502 5555 3456' },
       ],
       maxPlusOnes: 2,
       selectedPlusOnesCount: 0,
@@ -213,7 +218,7 @@ function getInitialDemoSeed(): {
       displayTitle: 'Carlos Mármol',
       familyGroupId: null,
       members: [
-        { id: 'm-carlos', name: 'Carlos Mármol', status: 'pending' },
+        { id: 'm-carlos', name: 'Carlos Mármol', status: 'pending', phone: '+502 5555 7890' },
       ],
       maxPlusOnes: 3,
       selectedPlusOnesCount: 0,
@@ -827,6 +832,48 @@ export async function updateInvitationPhone(
     localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
   }
   notifyLocalChange();
+}
+
+/**
+ * Updates individual phone number for a specific person in an invitation
+ * (either a titular member by memberId, or a companion by plusOneIndex)
+ */
+export async function updatePersonPhone(
+  invitationId: string,
+  personIdentifier: { memberId?: string; plusOneIndex?: number },
+  phone: string
+): Promise<void> {
+  const cleanPhone = phone.trim();
+  const db = getDb();
+  const all = getLocalInvitations();
+  const idx = all.findIndex((i) => i.id === invitationId);
+  if (idx < 0) return;
+
+  const inv: InvitationRecord = { ...all[idx] };
+
+  if (personIdentifier.memberId) {
+    inv.members = inv.members.map((m) =>
+      m.id === personIdentifier.memberId ? { ...m, phone: cleanPhone } : m
+    );
+  } else if (typeof personIdentifier.plusOneIndex === 'number') {
+    const companionPhones = [...(inv.companionPhones || [])];
+    companionPhones[personIdentifier.plusOneIndex] = cleanPhone;
+    inv.companionPhones = companionPhones;
+  }
+
+  // Si la invitación no tiene teléfono general de contacto, asignamos este
+  if (!inv.phone && cleanPhone) {
+    inv.phone = cleanPhone;
+  }
+
+  all[idx] = inv;
+  localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
+  notifyLocalChange();
+
+  if (db) {
+    const ref = doc(db, 'invitations', invitationId);
+    await setDoc(ref, inv, { merge: true });
+  }
 }
 
 export interface TableOccupancyStats {

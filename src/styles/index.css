@@ -1887,6 +1887,96 @@ body,
   color: #931919;
 }
 
+/* Botón Exportar CSV */
+.btn-export-csv {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1.5px solid #2e7d32;
+  background: #e8f5e9;
+  color: #1b5e20;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-export-csv:hover {
+  background: #c8e6c9;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(46, 125, 50, 0.2);
+}
+
+/* Vista Por Familia */
+.families-overview-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.family-section-card {
+  background: #fffdfa;
+  border: 1.5px solid #dfd1b8;
+  border-radius: 16px;
+  padding: 16px 18px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.family-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed #ded0b4;
+}
+
+.family-section-header h3 {
+  font-family: var(--font-serif);
+  font-size: 1.3rem;
+  color: var(--ink-night);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.family-stats-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.badge-family-stat {
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f4ecdc;
+  color: #554121;
+}
+
+.badge-family-stat.is-green {
+  background: #e3f5eb;
+  color: #165b35;
+}
+
+.badge-family-stat.is-yellow {
+  background: #fdf5e2;
+  color: #7b5809;
+}
+
+.badge-family-stat.is-red {
+  background: #fdeeee;
+  color: #922222;
+}
+
 /* ==================== TARJETAS DE GESTIÓN DE MESAS ==================== */
 
 .tables-management-layout {

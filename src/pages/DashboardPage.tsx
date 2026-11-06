@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  FileSpreadsheet,
 } from 'lucide-react';
 import {
   AttendanceStatus,
@@ -46,6 +47,7 @@ import {
   subscribeToDashboardData,
   updateGlobalSettings,
   updateInvitationPhone,
+  updatePersonPhone,
   upsertFamilyGroup,
   upsertInvitationRecord,
   upsertTable,
@@ -64,6 +66,8 @@ interface FlattenedGuest {
   uniqueId: string;
   name: string;
   isPlusOne: boolean;
+  memberId?: string;
+  plusOneIndex?: number;
   status: AttendanceStatus;
   invitationId: string;
   invitationTitle: string;
@@ -104,10 +108,12 @@ export const DashboardPage: React.FC = () => {
   >('ALL');
   const [guestTableFilter, setGuestTableFilter] = useState<string>('ALL');
   const [guestFamilyFilter, setGuestFamilyFilter] = useState<string>('ALL');
-  const [guestViewMode, setGuestViewMode] = useState<'by-person' | 'by-invitation'>('by-person');
+  const [guestViewMode, setGuestViewMode] = useState<
+    'by-person' | 'by-invitation' | 'by-family'
+  >('by-person');
 
-  // Quick Inline Phone Editing
-  const [quickPhoneInvId, setQuickPhoneInvId] = useState<string | null>(null);
+  // Quick Inline Phone Editing for a specific person
+  const [quickPhoneGuestId, setQuickPhoneGuestId] = useState<string | null>(null);
   const [quickPhoneValue, setQuickPhoneValue] = useState('');
 
   // ==================== FORMULARIO DE INVITACIONES ====================
@@ -117,6 +123,7 @@ export const DashboardPage: React.FC = () => {
   const [maxPlusOnes, setMaxPlusOnes] = useState<0 | 1 | 2 | 3>(0);
   const [customToken, setCustomToken] = useState('');
   const [memberNames, setMemberNames] = useState<string[]>(['']);
+  const [memberPhones, setMemberPhones] = useState<string[]>(['']);
   const [invPhone, setInvPhone] = useState('');
   const [invTableId, setInvTableId] = useState<string>('');
   const [formFeedback, setFormFeedback] = useState('');
@@ -280,11 +287,12 @@ export const DashboardPage: React.FC = () => {
           uniqueId: `mem-${inv.id}-${m.id || idx}`,
           name: m.name,
           isPlusOne: false,
+          memberId: m.id,
           status: m.status,
           invitationId: inv.id,
           invitationTitle: inv.displayTitle,
           token: inv.token,
-          phone: inv.phone,
+          phone: m.phone || (inv.members.length === 1 ? inv.phone : ''),
           tableId: inv.tableId,
           familyGroupId: inv.familyGroupId,
           familyName: famName,
@@ -299,11 +307,12 @@ export const DashboardPage: React.FC = () => {
             uniqueId: `plus-${inv.id}-${pIdx}`,
             name: plusName,
             isPlusOne: true,
+            plusOneIndex: pIdx,
             status: 'attending',
             invitationId: inv.id,
             invitationTitle: inv.displayTitle,
             token: inv.token,
-            phone: inv.phone,
+            phone: inv.companionPhones?.[pIdx] || '',
             tableId: inv.tableId,
             familyGroupId: inv.familyGroupId,
             familyName: famName,
@@ -375,10 +384,11 @@ export const DashboardPage: React.FC = () => {
     return raw.replace(/[^0-9]/g, '');
   };
 
-  const handleShareWhatsApp = (inv: InvitationRecord) => {
+  const handleShareWhatsApp = (inv: InvitationRecord, personPhone?: string) => {
     const url = buildInvitationUrl(inv.token);
     const text = `✨ Hola *${inv.displayTitle}*, te compartimos tu invitación personal e interactiva para el Bautizo y Primer Cumpleaños de *${invitationConfig.protagonistName}*:\n\n👉 ${url}`;
-    const cleanPhone = cleanPhoneNumber(inv.phone);
+    const phoneToUse = personPhone || inv.phone;
+    const cleanPhone = cleanPhoneNumber(phoneToUse);
 
     let waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
     if (cleanPhone.length >= 8) {
@@ -392,6 +402,58 @@ export const DashboardPage: React.FC = () => {
     navigator.clipboard.writeText(url);
     setCopiedId(inv.id);
     setTimeout(() => setCopiedId(null), 2200);
+  };
+
+  // ==================== EXPORTAR LISTA A CSV ====================
+  const handleExportCsv = () => {
+    const headers = [
+      'Invitado / Nombre',
+      'Tipo',
+      'Estado Asistencia',
+      'Teléfono / WhatsApp',
+      'Mesa Asignada',
+      'Invitación',
+      'Grupo Familiar',
+      'Enlace con Token',
+    ];
+
+    const rows = filteredGuests.map((g) => {
+      const tableName =
+        tables.find((t) => t.id === g.tableId)?.name || 'Sin mesa asignada';
+      const statusLabel =
+        g.status === 'attending'
+          ? 'Asiste'
+          : g.status === 'declined'
+          ? 'No asiste'
+          : 'Pendiente';
+      const typeLabel = g.isPlusOne ? 'Acompañante (+1)' : 'Titular';
+      const invUrl = buildInvitationUrl(g.token);
+
+      return [
+        `"${g.name.replace(/"/g, '""')}"`,
+        `"${typeLabel}"`,
+        `"${statusLabel}"`,
+        `"${(g.phone || '').replace(/"/g, '""')}"`,
+        `"${tableName.replace(/"/g, '""')}"`,
+        `"${g.invitationTitle.replace(/"/g, '""')}"`,
+        `"${(g.familyName || 'Sin Familia').replace(/"/g, '""')}"`,
+        `"${invUrl}"`,
+      ];
+    });
+
+    const csvContent =
+      '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    link.setAttribute('download', `lista_invitados_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // ==================== ASIGNACIÓN RÁPIDA DE MESA CON VALIDACIÓN DE CUPO ====================
@@ -434,10 +496,14 @@ export const DashboardPage: React.FC = () => {
     await assignInvitationToTable(invitationId, targetTableId);
   };
 
-  // ==================== GUARDAR TELÉFONO RÁPIDO ====================
-  const handleSaveQuickPhone = async (invitationId: string) => {
-    await updateInvitationPhone(invitationId, quickPhoneValue);
-    setQuickPhoneInvId(null);
+  // ==================== GUARDAR TELÉFONO RÁPIDO INDIVIDUAL POR PERSONA ====================
+  const handleSaveQuickPersonPhone = async (guest: FlattenedGuest) => {
+    await updatePersonPhone(
+      guest.invitationId,
+      { memberId: guest.memberId, plusOneIndex: guest.plusOneIndex },
+      quickPhoneValue
+    );
+    setQuickPhoneGuestId(null);
     setQuickPhoneValue('');
   };
 
@@ -503,6 +569,7 @@ export const DashboardPage: React.FC = () => {
     setMaxPlusOnes(0);
     setCustomToken('');
     setMemberNames(['']);
+    setMemberPhones(['']);
     setInvPhone('');
     setInvTableId('');
     setFormFeedback('');
@@ -515,6 +582,7 @@ export const DashboardPage: React.FC = () => {
     setMaxPlusOnes(inv.maxPlusOnes);
     setCustomToken(inv.token);
     setMemberNames(inv.members.map((m) => m.name));
+    setMemberPhones(inv.members.map((m) => m.phone || ''));
     setInvPhone(inv.phone || '');
     setInvTableId(inv.tableId || '');
     setActiveTab('invitations');
@@ -568,10 +636,12 @@ export const DashboardPage: React.FC = () => {
 
     const members: InvitationMember[] = cleanedNames.map((name, idx) => {
       const prevMember = existing?.members[idx];
+      const assignedPhone = memberPhones[idx]?.trim() || prevMember?.phone || '';
       return {
         id: prevMember?.id || `m-${Date.now()}-${idx}`,
         name,
         status: prevMember?.status || 'pending',
+        phone: assignedPhone || undefined,
       };
     });
 
@@ -584,8 +654,9 @@ export const DashboardPage: React.FC = () => {
       maxPlusOnes,
       selectedPlusOnesCount: existing?.selectedPlusOnesCount ?? 0,
       plusOneNames: existing?.plusOneNames ?? [],
+      companionPhones: existing?.companionPhones ?? [],
       notes: existing?.notes ?? '',
-      phone: invPhone.trim(),
+      phone: invPhone.trim() || members[0]?.phone || '',
       tableId: invTableId || null,
       respondedAt: existing?.respondedAt ?? null,
       createdAt: existing?.createdAt || new Date().toISOString(),
@@ -849,25 +920,46 @@ export const DashboardPage: React.FC = () => {
             <div>
               <h2>Lista General de Invitados</h2>
               <p className="panel-helper" style={{ marginBottom: 0 }}>
-                Control detallado de cada persona, estado de confirmación, número de WhatsApp y asignación de mesa.
+                Control detallado de cada persona, teléfono individual, estado de confirmación y asignación de mesa.
               </p>
             </div>
 
-            <div className="view-mode-toggle">
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Botón Exportar CSV */}
               <button
                 type="button"
-                className={guestViewMode === 'by-person' ? 'is-active' : ''}
-                onClick={() => setGuestViewMode('by-person')}
+                className="btn-export-csv"
+                onClick={handleExportCsv}
+                title="Descargar lista completa en formato Excel / CSV"
               >
-                Por Persona ({flattenedGuests.length})
+                <FileSpreadsheet size={15} />
+                <span>Exportar CSV ({filteredGuests.length})</span>
               </button>
-              <button
-                type="button"
-                className={guestViewMode === 'by-invitation' ? 'is-active' : ''}
-                onClick={() => setGuestViewMode('by-invitation')}
-              >
-                Por Invitación ({invitations.length})
-              </button>
+
+              {/* Selector de modo de vista: Por Persona / Por Invitación / Por Familia */}
+              <div className="view-mode-toggle">
+                <button
+                  type="button"
+                  className={guestViewMode === 'by-person' ? 'is-active' : ''}
+                  onClick={() => setGuestViewMode('by-person')}
+                >
+                  Por Persona ({flattenedGuests.length})
+                </button>
+                <button
+                  type="button"
+                  className={guestViewMode === 'by-invitation' ? 'is-active' : ''}
+                  onClick={() => setGuestViewMode('by-invitation')}
+                >
+                  Por Invitación ({invitations.length})
+                </button>
+                <button
+                  type="button"
+                  className={guestViewMode === 'by-family' ? 'is-active' : ''}
+                  onClick={() => setGuestViewMode('by-family')}
+                >
+                  Por Familia ({families.length})
+                </button>
+              </div>
             </div>
           </div>
 
@@ -890,7 +982,10 @@ export const DashboardPage: React.FC = () => {
               <span>Con Mesa Asignada:</span> <strong>{stats.attendingWithTable}</strong>
             </span>
             {stats.attendingWithoutTable > 0 && (
-              <span className="guest-kpi-pill" style={{ background: '#fff0d6', borderColor: '#e4b66f', color: '#885305' }}>
+              <span
+                className="guest-kpi-pill"
+                style={{ background: '#fff0d6', borderColor: '#e4b66f', color: '#885305' }}
+              >
                 <AlertTriangle size={14} />
                 <span>Asisten sin mesa:</span> <strong>{stats.attendingWithoutTable}</strong>
               </span>
@@ -953,7 +1048,7 @@ export const DashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* VISTA 1: POR PERSONA (LISTA NOMINAL) */}
+          {/* ==================== VISTA 1: POR PERSONA (LISTA NOMINAL) ==================== */}
           {guestViewMode === 'by-person' && (
             <div className="guests-table-wrapper">
               <table className="guests-table">
@@ -977,8 +1072,7 @@ export const DashboardPage: React.FC = () => {
                   ) : (
                     filteredGuests.map((guest) => {
                       const inv = invitations.find((i) => i.id === guest.invitationId);
-                      const currentTable = tables.find((t) => t.id === guest.tableId);
-                      const isEditingPhone = quickPhoneInvId === guest.invitationId;
+                      const isEditingPhone = quickPhoneGuestId === guest.uniqueId;
 
                       return (
                         <tr key={guest.uniqueId}>
@@ -1015,7 +1109,7 @@ export const DashboardPage: React.FC = () => {
                             </span>
                           </td>
 
-                          {/* Teléfono / WhatsApp */}
+                          {/* Teléfono individual / WhatsApp */}
                           <td>
                             {isEditingPhone ? (
                               <div className="phone-quick-edit-row">
@@ -1030,15 +1124,15 @@ export const DashboardPage: React.FC = () => {
                                 <button
                                   type="button"
                                   className="btn-icon-save"
-                                  onClick={() => handleSaveQuickPhone(guest.invitationId)}
-                                  title="Guardar teléfono"
+                                  onClick={() => handleSaveQuickPersonPhone(guest)}
+                                  title="Guardar teléfono de esta persona"
                                 >
                                   <Check size={14} />
                                 </button>
                                 <button
                                   type="button"
                                   className="btn-icon-cancel"
-                                  onClick={() => setQuickPhoneInvId(null)}
+                                  onClick={() => setQuickPhoneGuestId(null)}
                                   title="Cancelar"
                                 >
                                   <X size={14} />
@@ -1051,8 +1145,8 @@ export const DashboardPage: React.FC = () => {
                                   <button
                                     type="button"
                                     className="btn-wa-direct"
-                                    onClick={() => handleShareWhatsApp(inv)}
-                                    title="Enviar invitación por WhatsApp"
+                                    onClick={() => handleShareWhatsApp(inv, guest.phone)}
+                                    title="Enviar invitación por WhatsApp a este número"
                                   >
                                     <MessageCircle size={13} />
                                     <span>WhatsApp</span>
@@ -1060,12 +1154,17 @@ export const DashboardPage: React.FC = () => {
                                 )}
                                 <button
                                   type="button"
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#826e4f' }}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: '#826e4f',
+                                  }}
                                   onClick={() => {
-                                    setQuickPhoneInvId(guest.invitationId);
+                                    setQuickPhoneGuestId(guest.uniqueId);
                                     setQuickPhoneValue(guest.phone || '');
                                   }}
-                                  title="Editar teléfono"
+                                  title="Editar teléfono de esta persona"
                                 >
                                   <Edit3 size={13} />
                                 </button>
@@ -1075,7 +1174,7 @@ export const DashboardPage: React.FC = () => {
                                 type="button"
                                 className="btn-add-phone-quick"
                                 onClick={() => {
-                                  setQuickPhoneInvId(guest.invitationId);
+                                  setQuickPhoneGuestId(guest.uniqueId);
                                   setQuickPhoneValue('');
                                 }}
                               >
@@ -1159,7 +1258,7 @@ export const DashboardPage: React.FC = () => {
             </div>
           )}
 
-          {/* VISTA 2: POR INVITACIÓN (GRUPOS) */}
+          {/* ==================== VISTA 2: POR INVITACIÓN (GRUPOS) ==================== */}
           {guestViewMode === 'by-invitation' && (
             <div className="guests-table-wrapper">
               <table className="guests-table">
@@ -1189,6 +1288,7 @@ export const DashboardPage: React.FC = () => {
                             {inv.members.map((m) => (
                               <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <span>{m.name}</span>
+                                {m.phone && <small style={{ color: '#685434' }}>({m.phone})</small>}
                                 <span className={`status-tag is-${m.status}`} style={{ fontSize: '0.7rem' }}>
                                   {m.status === 'attending'
                                     ? '✓ Asiste'
@@ -1274,6 +1374,458 @@ export const DashboardPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* ==================== VISTA 3: POR FAMILIA ==================== */}
+          {guestViewMode === 'by-family' && (
+            <div className="families-overview-container">
+              {/* Recorrer cada grupo familiar */}
+              {families.map((fam) => {
+                const famGuests = filteredGuests.filter((g) => g.familyGroupId === fam.id);
+                if (guestFamilyFilter !== 'ALL' && guestFamilyFilter !== fam.id) return null;
+                if (famGuests.length === 0 && guestSearch.trim()) return null;
+
+                const totalFam = famGuests.length;
+                const attendingFam = famGuests.filter((g) => g.status === 'attending').length;
+                const declinedFam = famGuests.filter((g) => g.status === 'declined').length;
+                const pendingFam = famGuests.filter((g) => g.status === 'pending').length;
+
+                // Nombres de mesas asignadas a miembros de esta familia
+                const famTableIds = Array.from(
+                  new Set(famGuests.map((g) => g.tableId).filter(Boolean))
+                );
+                const famTableNames = famTableIds
+                  .map((tId) => tables.find((t) => t.id === tId)?.name)
+                  .filter(Boolean);
+
+                return (
+                  <article key={fam.id} className="family-section-card">
+                    <div className="family-section-header">
+                      <div>
+                        <h3>
+                          <Users size={18} />
+                          <span>{fam.name}</span>
+                        </h3>
+                        {famTableNames.length > 0 ? (
+                          <small style={{ color: '#1a4b81', fontWeight: 600 }}>
+                            🪑 Mesas de la familia: {famTableNames.join(', ')}
+                          </small>
+                        ) : (
+                          <small style={{ color: '#8d754e', fontStyle: 'italic' }}>
+                            Sin mesas asignadas aún
+                          </small>
+                        )}
+                      </div>
+
+                      <div className="family-stats-badge-row">
+                        <span className="badge-family-stat">Total: {totalFam}</span>
+                        <span className="badge-family-stat is-green">✓ Asisten: {attendingFam}</span>
+                        <span className="badge-family-stat is-red">✕ No: {declinedFam}</span>
+                        <span className="badge-family-stat is-yellow">⏳ Pendientes: {pendingFam}</span>
+                      </div>
+                    </div>
+
+                    <div className="guests-table-wrapper">
+                      <table className="guests-table">
+                        <thead>
+                          <tr>
+                            <th>Invitado / Integrante</th>
+                            <th>Invitación</th>
+                            <th>Estado</th>
+                            <th>Teléfono / WhatsApp</th>
+                            <th>Mesa Asignada</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {famGuests.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} style={{ textAlign: 'center', padding: '20px' }}>
+                                No hay invitados registrados en esta familia.
+                              </td>
+                            </tr>
+                          ) : (
+                            famGuests.map((guest) => {
+                              const inv = invitations.find((i) => i.id === guest.invitationId);
+                              const isEditingPhone = quickPhoneGuestId === guest.uniqueId;
+
+                              return (
+                                <tr key={guest.uniqueId}>
+                                  <td>
+                                    <div className="guest-name-cell">
+                                      <span className="guest-primary-name">{guest.name}</span>
+                                      {guest.isPlusOne && (
+                                        <span className="badge-tag-companion">Acompañante (+1)</span>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  <td>
+                                    <em>{guest.invitationTitle}</em>
+                                  </td>
+
+                                  <td>
+                                    <span className={`status-tag is-${guest.status}`}>
+                                      {guest.status === 'attending'
+                                        ? '✓ Asiste'
+                                        : guest.status === 'declined'
+                                        ? '✕ No asiste'
+                                        : '⏳ Pendiente'}
+                                    </span>
+                                  </td>
+
+                                  <td>
+                                    {isEditingPhone ? (
+                                      <div className="phone-quick-edit-row">
+                                        <input
+                                          type="tel"
+                                          className="phone-quick-input"
+                                          placeholder="+502 1234 5678"
+                                          value={quickPhoneValue}
+                                          onChange={(e) => setQuickPhoneValue(e.target.value)}
+                                          autoFocus
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn-icon-save"
+                                          onClick={() => handleSaveQuickPersonPhone(guest)}
+                                          title="Guardar teléfono"
+                                        >
+                                          <Check size={14} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-icon-cancel"
+                                          onClick={() => setQuickPhoneGuestId(null)}
+                                          title="Cancelar"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      </div>
+                                    ) : guest.phone ? (
+                                      <div className="guest-phone-cell">
+                                        <span style={{ fontWeight: 600 }}>{guest.phone}</span>
+                                        {inv && (
+                                          <button
+                                            type="button"
+                                            className="btn-wa-direct"
+                                            onClick={() => handleShareWhatsApp(inv, guest.phone)}
+                                            title="Enviar WhatsApp"
+                                          >
+                                            <MessageCircle size={13} />
+                                            <span>WhatsApp</span>
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            color: '#826e4f',
+                                          }}
+                                          onClick={() => {
+                                            setQuickPhoneGuestId(guest.uniqueId);
+                                            setQuickPhoneValue(guest.phone || '');
+                                          }}
+                                          title="Editar teléfono"
+                                        >
+                                          <Edit3 size={13} />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="btn-add-phone-quick"
+                                        onClick={() => {
+                                          setQuickPhoneGuestId(guest.uniqueId);
+                                          setQuickPhoneValue('');
+                                        }}
+                                      >
+                                        <Plus size={11} /> Agregar teléfono
+                                      </button>
+                                    )}
+                                  </td>
+
+                                  <td>
+                                    <select
+                                      className={`table-quick-select ${
+                                        !guest.tableId ? 'is-empty' : ''
+                                      }`}
+                                      value={guest.tableId || ''}
+                                      onChange={(e) =>
+                                        handleQuickAssignTable(
+                                          guest.invitationId,
+                                          e.target.value || null
+                                        )
+                                      }
+                                    >
+                                      <option value="">(Sin mesa asignada)</option>
+                                      {tables.map((tbl) => {
+                                        const occ = calculateTableOccupancy(
+                                          tbl.id,
+                                          tbl.capacity,
+                                          invitations
+                                        );
+                                        const isCurrent = tbl.id === guest.tableId;
+                                        const isFull =
+                                          !isCurrent && occ.confirmedCount >= tbl.capacity;
+                                        return (
+                                          <option key={tbl.id} value={tbl.id}>
+                                            {tbl.name} ({occ.confirmedCount}/{tbl.capacity}
+                                            {isFull ? ' - LLENA' : ''})
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  </td>
+
+                                  <td>
+                                    {inv && (
+                                      <div style={{ display: 'flex', gap: '5px' }}>
+                                        <button
+                                          type="button"
+                                          className="btn-card-small"
+                                          onClick={() => handleCopyLink(inv)}
+                                          title="Copiar enlace con token"
+                                        >
+                                          {copiedId === inv.id ? <Check size={13} /> : <Copy size={13} />}
+                                        </button>
+                                        <a
+                                          href={buildInvitationUrl(inv.token)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="btn-card-small"
+                                          title="Abrir invitación"
+                                        >
+                                          <ExternalLink size={13} />
+                                        </a>
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </article>
+                );
+              })}
+
+              {/* Sección Especial: Invitados Individuales (Sin Grupo Familiar) */}
+              {(() => {
+                const nonFamGuests = filteredGuests.filter((g) => !g.familyGroupId);
+                if (nonFamGuests.length === 0) return null;
+                if (guestFamilyFilter !== 'ALL' && guestFamilyFilter !== 'NONE') return null;
+
+                const attendingNonFam = nonFamGuests.filter((g) => g.status === 'attending').length;
+                const declinedNonFam = nonFamGuests.filter((g) => g.status === 'declined').length;
+                const pendingNonFam = nonFamGuests.filter((g) => g.status === 'pending').length;
+
+                return (
+                  <article className="family-section-card">
+                    <div className="family-section-header">
+                      <div>
+                        <h3>
+                          <UserCheck size={18} />
+                          <span>Invitados Individuales (Sin Grupo Familiar)</span>
+                        </h3>
+                        <small style={{ color: '#8d754e' }}>
+                          Invitados que no comparten token familiar con otros miembros.
+                        </small>
+                      </div>
+
+                      <div className="family-stats-badge-row">
+                        <span className="badge-family-stat">Total: {nonFamGuests.length}</span>
+                        <span className="badge-family-stat is-green">✓ Asisten: {attendingNonFam}</span>
+                        <span className="badge-family-stat is-red">✕ No: {declinedNonFam}</span>
+                        <span className="badge-family-stat is-yellow">⏳ Pendientes: {pendingNonFam}</span>
+                      </div>
+                    </div>
+
+                    <div className="guests-table-wrapper">
+                      <table className="guests-table">
+                        <thead>
+                          <tr>
+                            <th>Invitado / Integrante</th>
+                            <th>Invitación</th>
+                            <th>Estado</th>
+                            <th>Teléfono / WhatsApp</th>
+                            <th>Mesa Asignada</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {nonFamGuests.map((guest) => {
+                            const inv = invitations.find((i) => i.id === guest.invitationId);
+                            const isEditingPhone = quickPhoneGuestId === guest.uniqueId;
+
+                            return (
+                              <tr key={guest.uniqueId}>
+                                <td>
+                                  <div className="guest-name-cell">
+                                    <span className="guest-primary-name">{guest.name}</span>
+                                    {guest.isPlusOne && (
+                                      <span className="badge-tag-companion">Acompañante (+1)</span>
+                                    )}
+                                  </div>
+                                </td>
+
+                                <td>
+                                  <em>{guest.invitationTitle}</em>
+                                </td>
+
+                                <td>
+                                  <span className={`status-tag is-${guest.status}`}>
+                                    {guest.status === 'attending'
+                                      ? '✓ Asiste'
+                                      : guest.status === 'declined'
+                                      ? '✕ No asiste'
+                                      : '⏳ Pendiente'}
+                                  </span>
+                                </td>
+
+                                <td>
+                                  {isEditingPhone ? (
+                                    <div className="phone-quick-edit-row">
+                                      <input
+                                        type="tel"
+                                        className="phone-quick-input"
+                                        placeholder="+502 1234 5678"
+                                        value={quickPhoneValue}
+                                        onChange={(e) => setQuickPhoneValue(e.target.value)}
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        className="btn-icon-save"
+                                        onClick={() => handleSaveQuickPersonPhone(guest)}
+                                        title="Guardar teléfono"
+                                      >
+                                        <Check size={14} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn-icon-cancel"
+                                        onClick={() => setQuickPhoneGuestId(null)}
+                                        title="Cancelar"
+                                      >
+                                        <X size={14} />
+                                      </button>
+                                    </div>
+                                  ) : guest.phone ? (
+                                    <div className="guest-phone-cell">
+                                      <span style={{ fontWeight: 600 }}>{guest.phone}</span>
+                                      {inv && (
+                                        <button
+                                          type="button"
+                                          className="btn-wa-direct"
+                                          onClick={() => handleShareWhatsApp(inv, guest.phone)}
+                                          title="Enviar WhatsApp"
+                                        >
+                                          <MessageCircle size={13} />
+                                          <span>WhatsApp</span>
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        style={{
+                                          background: 'none',
+                                          border: 'none',
+                                          cursor: 'pointer',
+                                          color: '#826e4f',
+                                        }}
+                                        onClick={() => {
+                                          setQuickPhoneGuestId(guest.uniqueId);
+                                          setQuickPhoneValue(guest.phone || '');
+                                        }}
+                                        title="Editar teléfono"
+                                      >
+                                        <Edit3 size={13} />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="btn-add-phone-quick"
+                                      onClick={() => {
+                                        setQuickPhoneGuestId(guest.uniqueId);
+                                        setQuickPhoneValue('');
+                                      }}
+                                    >
+                                      <Plus size={11} /> Agregar teléfono
+                                    </button>
+                                  )}
+                                </td>
+
+                                <td>
+                                  <select
+                                    className={`table-quick-select ${
+                                      !guest.tableId ? 'is-empty' : ''
+                                    }`}
+                                    value={guest.tableId || ''}
+                                    onChange={(e) =>
+                                      handleQuickAssignTable(
+                                        guest.invitationId,
+                                        e.target.value || null
+                                      )
+                                    }
+                                  >
+                                    <option value="">(Sin mesa asignada)</option>
+                                    {tables.map((tbl) => {
+                                      const occ = calculateTableOccupancy(
+                                        tbl.id,
+                                        tbl.capacity,
+                                        invitations
+                                      );
+                                      const isCurrent = tbl.id === guest.tableId;
+                                      const isFull =
+                                        !isCurrent && occ.confirmedCount >= tbl.capacity;
+                                      return (
+                                        <option key={tbl.id} value={tbl.id}>
+                                          {tbl.name} ({occ.confirmedCount}/{tbl.capacity}
+                                          {isFull ? ' - LLENA' : ''})
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </td>
+
+                                <td>
+                                  {inv && (
+                                    <div style={{ display: 'flex', gap: '5px' }}>
+                                      <button
+                                        type="button"
+                                        className="btn-card-small"
+                                        onClick={() => handleCopyLink(inv)}
+                                        title="Copiar enlace con token"
+                                      >
+                                        {copiedId === inv.id ? <Check size={13} /> : <Copy size={13} />}
+                                      </button>
+                                      <a
+                                        href={buildInvitationUrl(inv.token)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="btn-card-small"
+                                        title="Abrir invitación"
+                                      >
+                                        <ExternalLink size={13} />
+                                      </a>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </article>
+                );
+              })()}
             </div>
           )}
         </section>
@@ -1569,7 +2121,7 @@ export const DashboardPage: React.FC = () => {
               <div className="form-row-2">
                 <div className="form-group">
                   <label>
-                    <Phone size={14} /> Teléfono / WhatsApp de contacto
+                    <Phone size={14} /> Teléfono general / WhatsApp
                   </label>
                   <input
                     type="tel"
@@ -1590,7 +2142,11 @@ export const DashboardPage: React.FC = () => {
                   >
                     <option value="">(Sin mesa asignada por ahora)</option>
                     {tables.map((t) => {
-                      const occ = calculateTableOccupancy(t.id, t.capacity, invitations.filter((i) => i.id !== editingId));
+                      const occ = calculateTableOccupancy(
+                        t.id,
+                        t.capacity,
+                        invitations.filter((i) => i.id !== editingId)
+                      );
                       return (
                         <option key={t.id} value={t.id}>
                           {t.name} ({occ.confirmedCount}/{t.capacity} pers. - {occ.availableSeats} libres)
@@ -1636,31 +2192,42 @@ export const DashboardPage: React.FC = () => {
               {/* Lista de Personas Titulares en esta Invitación */}
               <div className="form-group">
                 <label>
-                  Nombres de las personas en esta invitación (selección individual)
+                  Personas en esta invitación (nombre y teléfono individual)
                 </label>
                 <div className="members-inputs-stack">
                   {memberNames.map((name, idx) => (
-                    <div key={idx} className="member-input-row">
+                    <div key={idx} className="member-input-row" style={{ display: 'flex', gap: '8px' }}>
                       <input
                         type="text"
-                        placeholder={`Nombre persona #${idx + 1} (ej. ${
-                          idx === 0 ? 'Juan Picapiedra' : 'María Picapiedra'
-                        })`}
+                        placeholder={`Nombre persona #${idx + 1}`}
                         value={name}
                         onChange={(e) => {
                           const copy = [...memberNames];
                           copy[idx] = e.target.value;
                           setMemberNames(copy);
                         }}
+                        style={{ flex: 1.2 }}
                         required
+                      />
+                      <input
+                        type="tel"
+                        placeholder="WhatsApp (opcional)"
+                        value={memberPhones[idx] || ''}
+                        onChange={(e) => {
+                          const copy = [...memberPhones];
+                          copy[idx] = e.target.value;
+                          setMemberPhones(copy);
+                        }}
+                        style={{ flex: 0.9, maxWidth: '170px' }}
                       />
                       {memberNames.length > 1 && (
                         <button
                           type="button"
                           className="btn-icon-danger"
-                          onClick={() =>
-                            setMemberNames(memberNames.filter((_, i) => i !== idx))
-                          }
+                          onClick={() => {
+                            setMemberNames(memberNames.filter((_, i) => i !== idx));
+                            setMemberPhones(memberPhones.filter((_, i) => i !== idx));
+                          }}
                           title="Quitar persona"
                         >
                           <Trash2 size={15} />
@@ -1672,7 +2239,10 @@ export const DashboardPage: React.FC = () => {
                 <button
                   type="button"
                   className="btn-add-member-line"
-                  onClick={() => setMemberNames([...memberNames, ''])}
+                  onClick={() => {
+                    setMemberNames([...memberNames, '']);
+                    setMemberPhones([...memberPhones, '']);
+                  }}
                 >
                   <Plus size={14} />
                   <span>
@@ -1742,7 +2312,17 @@ export const DashboardPage: React.FC = () => {
                           </span>
 
                           {assignedTable ? (
-                            <span className="badge-table" style={{ background: '#eaf2fd', color: '#1a4b81', borderRadius: '999px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 700 }}>
+                            <span
+                              className="badge-table"
+                              style={{
+                                background: '#eaf2fd',
+                                color: '#1a4b81',
+                                borderRadius: '999px',
+                                padding: '2px 8px',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                              }}
+                            >
                               🪑 {assignedTable.name}
                             </span>
                           ) : (
@@ -1789,7 +2369,12 @@ export const DashboardPage: React.FC = () => {
                     <div className="inv-members-status-list">
                       {inv.members.map((m) => (
                         <div key={m.id} className="member-status-pill-row">
-                          <span>{m.name}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{m.name}</span>
+                            {m.phone && (
+                              <small style={{ color: '#776241' }}>({m.phone})</small>
+                            )}
+                          </span>
                           <span className={`status-tag is-${m.status}`}>
                             {m.status === 'attending'
                               ? '✓ Sí asiste'
