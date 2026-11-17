@@ -219,52 +219,76 @@ export const DashboardPage: React.FC = () => {
     return () => unsub();
   }, [unlocked]);
 
+  // Real-time listener for RSVP alerts from Firestore / local storage
+  useEffect(() => {
+    if (!unlocked) return;
+    const unsub = subscribeToAlerts((incomingAlerts) => {
+      setAlerts(incomingAlerts);
+    });
+    return () => unsub();
+  }, [unlocked]);
+
+  // Combined alerts: combines /alerts collection + lastAlert backup on invitations
+  const displayAlerts = useMemo(() => {
+    const map = new Map<string, RsvpAlertRecord>();
+    alerts.forEach((a) => map.set(a.id, a));
+    invitations.forEach((inv) => {
+      if (inv.lastAlert) {
+        const existing = map.get(inv.lastAlert.id);
+        if (!existing) {
+          map.set(inv.lastAlert.id, inv.lastAlert);
+        }
+      }
+    });
+    const list = Array.from(map.values());
+    list.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    return list;
+  }, [alerts, invitations]);
+
   // Real-time listener for RSVP alerts with sound & native device notifications
   const previousAlertIdsRef = React.useRef<Set<string>>(new Set());
   const initialAlertsLoadedRef = React.useRef<boolean>(false);
 
   useEffect(() => {
     if (!unlocked) return;
-    const unsub = subscribeToAlerts((incomingAlerts) => {
-      setAlerts(incomingAlerts);
+    if (displayAlerts.length === 0) return;
 
-      if (!initialAlertsLoadedRef.current) {
-        initialAlertsLoadedRef.current = true;
-        previousAlertIdsRef.current = new Set(incomingAlerts.map((a) => a.id));
-        return;
-      }
+    if (!initialAlertsLoadedRef.current) {
+      initialAlertsLoadedRef.current = true;
+      previousAlertIdsRef.current = new Set(displayAlerts.map((a) => a.id));
+      return;
+    }
 
-      const newAlerts = incomingAlerts.filter(
-        (a) => !previousAlertIdsRef.current.has(a.id)
-      );
+    const newAlerts = displayAlerts.filter(
+      (a) => !previousAlertIdsRef.current.has(a.id)
+    );
 
-      if (newAlerts.length > 0) {
-        const latest = newAlerts[0];
-        ambientAudio.playNotificationChime();
-        setActiveToast(latest);
-        setTimeout(() => setActiveToast(null), 7000);
+    if (newAlerts.length > 0) {
+      const latest = newAlerts[0];
+      ambientAudio.playNotificationChime();
+      setActiveToast(latest);
+      setTimeout(() => setActiveToast(null), 7000);
 
-        if (
-          typeof window !== 'undefined' &&
-          'Notification' in window &&
-          Notification.permission === 'granted'
-        ) {
-          try {
-            new Notification(`🌟 Confirmación: ${latest.displayTitle}`, {
-              body: latest.summary,
-              icon: '/favicon.ico',
-            });
-          } catch (e) {
-            console.warn('Native notification error:', e);
-          }
+      if (
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        try {
+          new Notification(`🌟 Confirmación: ${latest.displayTitle}`, {
+            body: latest.summary,
+            icon: '/favicon.ico',
+          });
+        } catch (e) {
+          console.warn('Native notification error:', e);
         }
       }
+    }
 
-      previousAlertIdsRef.current = new Set(incomingAlerts.map((a) => a.id));
-    });
-
-    return () => unsub();
-  }, [unlocked]);
+    previousAlertIdsRef.current = new Set(displayAlerts.map((a) => a.id));
+  }, [unlocked, displayAlerts]);
 
   const thisDeviceId = useMemo(() => getLocalDeviceId(), []);
   const registeredDevices = useMemo(
@@ -1109,16 +1133,16 @@ export const DashboardPage: React.FC = () => {
           <button
             type="button"
             className={`btn-topbar-bell ${
-              alerts.some((a) => !a.read) ? 'has-unread-pulse' : ''
+              displayAlerts.some((a) => !a.read) ? 'has-unread-pulse' : ''
             }`}
             onClick={() => setActiveTab('alerts')}
             title="Centro de Alertas de Confirmación"
           >
             <Bell size={15} />
             <span>Alertas</span>
-            {alerts.filter((a) => !a.read).length > 0 && (
+            {displayAlerts.filter((a) => !a.read).length > 0 && (
               <span className="topbar-unread-pill">
-                {alerts.filter((a) => !a.read).length}
+                {displayAlerts.filter((a) => !a.read).length}
               </span>
             )}
           </button>
@@ -1186,9 +1210,9 @@ export const DashboardPage: React.FC = () => {
         >
           <Bell size={16} />
           <span>Alertas y Dispositivos</span>
-          {alerts.filter((a) => !a.read).length > 0 && (
+          {displayAlerts.filter((a) => !a.read).length > 0 && (
             <span className="tab-unread-counter">
-              {alerts.filter((a) => !a.read).length}
+              {displayAlerts.filter((a) => !a.read).length}
             </span>
           )}
         </button>
@@ -2195,7 +2219,7 @@ export const DashboardPage: React.FC = () => {
                 Recibe notificaciones en tu celular cada vez que un invitado confirme o modifique su asistencia.
               </p>
             </div>
-            {alerts.length > 0 && (
+            {displayAlerts.length > 0 && (
               <button
                 type="button"
                 className="btn-mark-all-read"
@@ -2358,11 +2382,11 @@ export const DashboardPage: React.FC = () => {
           {/* Feed de Alertas / Historial en Vivo */}
           <div className="alerts-feed-section">
             <div className="feed-header">
-              <h3>Historial de Confirmaciones en Vivo ({alerts.length})</h3>
+              <h3>Historial de Confirmaciones en Vivo ({displayAlerts.length})</h3>
               <span className="live-pulse-badge">● Escuchando en tiempo real</span>
             </div>
 
-            {alerts.length === 0 ? (
+            {displayAlerts.length === 0 ? (
               <div className="empty-alerts-box">
                 <Sparkles size={32} />
                 <p>
@@ -2371,7 +2395,7 @@ export const DashboardPage: React.FC = () => {
               </div>
             ) : (
               <div className="alerts-list">
-                {alerts.map((al) => {
+                {displayAlerts.map((al) => {
                   const isUnread = !al.read;
                   return (
                     <article

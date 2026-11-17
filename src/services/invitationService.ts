@@ -67,6 +67,8 @@ export interface InvitationRecord {
   tableId?: string | null;
   /** Tipo de evento: 'full' (Bautizo 11:30 AM + Cumpleaños 2:30 PM) o 'party_only' (Solo Cumpleaños 2:30 PM) */
   eventScope?: EventScope;
+  /** Última alerta generada al confirmar (respaldo en tiempo real que no depende de reglas de la colección alerts) */
+  lastAlert?: RsvpAlertRecord;
   respondedAt: string | null;
   createdAt: string;
 }
@@ -680,8 +682,6 @@ export async function submitGuestRsvp(
   const db = getDb();
 
   let existingRecord: InvitationRecord | null = null;
-  let updatedRecord: InvitationRecord;
-
   if (db) {
     const ref = doc(db, 'invitations', invitationId);
     const snap = await getDoc(ref);
@@ -689,89 +689,98 @@ export async function submitGuestRsvp(
       throw new Error('No se encontró la invitación.');
     }
     existingRecord = snap.data() as InvitationRecord;
-    updatedRecord = {
-      ...existingRecord,
-      members: payload.members,
-      selectedPlusOnesCount: Math.min(
-        existingRecord.maxPlusOnes,
-        effectivePlusOnesCount
-      ),
-      plusOneNames: cleanedPlusOneNames,
-      notes: payload.notes ?? existingRecord.notes ?? '',
-      respondedAt: now,
-    };
-    await setDoc(ref, updatedRecord);
   } else {
-    // Local fallback
     const all = getLocalInvitations();
     const idx = all.findIndex((i) => i.id === invitationId);
     if (idx === -1) throw new Error('No se encontró la invitación.');
     existingRecord = all[idx];
-    updatedRecord = {
-      ...existingRecord,
-      members: payload.members,
-      selectedPlusOnesCount: Math.min(
-        existingRecord.maxPlusOnes,
-        effectivePlusOnesCount
-      ),
-      plusOneNames: cleanedPlusOneNames,
-      notes: payload.notes ?? existingRecord.notes ?? '',
-      respondedAt: now,
-    };
-    all[idx] = updatedRecord;
-    localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
-    notifyLocalChange();
   }
 
   // Generate real-time notification alert record for parents
-  if (existingRecord) {
-    const attendingMembers = payload.members
-      .filter((m) => m.status === 'attending')
-      .map((m) => m.name);
-    const declinedMembers = payload.members
-      .filter((m) => m.status === 'declined')
-      .map((m) => m.name);
-    const scope: EventScope = existingRecord.eventScope || 'full';
-    const scopeLabel =
-      scope === 'party_only'
-        ? 'Cumpleaños (2:30 PM)'
-        : 'Bautizo (11:30 AM) + Cumpleaños';
+  const attendingMembers = payload.members
+    .filter((m) => m.status === 'attending')
+    .map((m) => m.name);
+  const declinedMembers = payload.members
+    .filter((m) => m.status === 'declined')
+    .map((m) => m.name);
+  const scope: EventScope = existingRecord.eventScope || 'full';
+  const scopeLabel =
+    scope === 'party_only'
+      ? 'Cumpleaños (2:30 PM)'
+      : 'Bautizo (11:30 AM) + Cumpleaños';
 
-    const summaryParts: string[] = [];
-    if (attendingMembers.length > 0) {
-      summaryParts.push(`${attendingMembers.length} asiste(n) [${attendingMembers.join(', ')}]`);
-    }
-    if (declinedMembers.length > 0) {
-      summaryParts.push(`${declinedMembers.length} no asiste(n) [${declinedMembers.join(', ')}]`);
-    }
-    if (cleanedPlusOneNames.length > 0) {
-      summaryParts.push(`+${cleanedPlusOneNames.length} extra (${cleanedPlusOneNames.join(', ')})`);
-    }
+  const summaryParts: string[] = [];
+  if (attendingMembers.length > 0) {
+    summaryParts.push(
+      `${attendingMembers.length} asiste(n) [${attendingMembers.join(', ')}]`
+    );
+  }
+  if (declinedMembers.length > 0) {
+    summaryParts.push(
+      `${declinedMembers.length} no asiste(n) [${declinedMembers.join(', ')}]`
+    );
+  }
+  if (cleanedPlusOneNames.length > 0) {
+    summaryParts.push(
+      `+${cleanedPlusOneNames.length} extra (${cleanedPlusOneNames.join(', ')})`
+    );
+  }
 
-    const alertRecord: RsvpAlertRecord = {
-      id: `alert-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      invitationId,
-      displayTitle: existingRecord.displayTitle,
-      summary: `${existingRecord.displayTitle} confirmó: ${summaryParts.join(' • ') || 'Sin cambios'} (${scopeLabel})`,
-      details: {
-        attending: attendingMembers,
-        declined: declinedMembers,
-        plusOnes: cleanedPlusOneNames,
-        notes: payload.notes ?? existingRecord.notes ?? '',
-      },
-      eventScope: scope,
-      timestamp: now,
-      read: false,
-    };
+  const alertRecord: RsvpAlertRecord = {
+    id: `alert-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    invitationId,
+    displayTitle: existingRecord.displayTitle,
+    summary: `${existingRecord.displayTitle} confirmó: ${
+      summaryParts.join(' • ') || 'Sin cambios'
+    } (${scopeLabel})`,
+    details: {
+      attending: attendingMembers,
+      declined: declinedMembers,
+      plusOnes: cleanedPlusOneNames,
+      notes: payload.notes ?? existingRecord.notes ?? '',
+    },
+    eventScope: scope,
+    timestamp: now,
+    read: false,
+  };
 
-    saveLocalAlert(alertRecord);
+  saveLocalAlert(alertRecord);
 
-    if (db) {
-      try {
-        await setDoc(doc(db, 'alerts', alertRecord.id), alertRecord);
-      } catch (err) {
-        console.warn('No se pudo guardar la alerta en Firestore alerts:', err);
-      }
+  // Store alert directly inside updatedRecord so it is backed up in invitations
+  // (which already has guaranteed read/write permissions in Firestore)
+  const updatedRecord: InvitationRecord = {
+    ...existingRecord,
+    members: payload.members,
+    selectedPlusOnesCount: Math.min(
+      existingRecord.maxPlusOnes,
+      effectivePlusOnesCount
+    ),
+    plusOneNames: cleanedPlusOneNames,
+    notes: payload.notes ?? existingRecord.notes ?? '',
+    lastAlert: alertRecord,
+    respondedAt: now,
+  };
+
+  if (db) {
+    const ref = doc(db, 'invitations', invitationId);
+    await setDoc(ref, updatedRecord);
+
+    // Also attempt saving to the dedicated alerts collection (non-blocking)
+    void setDoc(doc(db, 'alerts', alertRecord.id), alertRecord).catch((err) => {
+      // If Firestore rules in Firebase console haven't been updated yet,
+      // the alert is already safely stored in invitations and won't be lost.
+      console.info(
+        'Aviso: Para habilitar la colección /alerts, agrega match /alerts/{alertId} en las reglas de Firestore Console:',
+        (err as Error)?.message || err
+      );
+    });
+  } else {
+    const all = getLocalInvitations();
+    const idx = all.findIndex((i) => i.id === invitationId);
+    if (idx >= 0) {
+      all[idx] = updatedRecord;
+      localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
+      notifyLocalChange();
     }
   }
 }
@@ -1175,19 +1184,6 @@ export async function unregisterAdminDevice(deviceId: string): Promise<void> {
 export function subscribeToAlerts(
   callback: (alerts: RsvpAlertRecord[]) => void
 ): () => void {
-  const db = getDb();
-  if (db) {
-    const unsub = onSnapshot(collection(db, 'alerts'), (snap) => {
-      const remoteAlerts = snap.docs.map((d) => d.data() as RsvpAlertRecord);
-      remoteAlerts.sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-      callback(remoteAlerts);
-    });
-    return unsub;
-  }
-
   const emitLocal = () => {
     const alerts = getLocalAlerts();
     alerts.sort(
@@ -1196,6 +1192,30 @@ export function subscribeToAlerts(
     );
     callback(alerts);
   };
+
+  const db = getDb();
+  if (db) {
+    const unsub = onSnapshot(
+      collection(db, 'alerts'),
+      (snap) => {
+        const remoteAlerts = snap.docs.map((d) => d.data() as RsvpAlertRecord);
+        remoteAlerts.sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        callback(remoteAlerts);
+      },
+      (err) => {
+        console.info(
+          'Aviso: Colección /alerts en Firestore protegida por reglas. Se usará el respaldo en invitaciones y local:',
+          err.message
+        );
+        emitLocal();
+      }
+    );
+    return unsub;
+  }
+
   emitLocal();
   window.addEventListener('cg-local-db-updated', emitLocal);
   window.addEventListener('storage', emitLocal);
@@ -1211,10 +1231,14 @@ export function subscribeToAlerts(
 export async function markAlertAsRead(alertId: string): Promise<void> {
   const db = getDb();
   if (db) {
-    const ref = doc(db, 'alerts', alertId);
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      await setDoc(ref, { ...snap.data(), read: true });
+    try {
+      const ref = doc(db, 'alerts', alertId);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        await setDoc(ref, { ...snap.data(), read: true });
+      }
+    } catch {
+      // Non-blocking fallback
     }
   }
 
@@ -1237,11 +1261,15 @@ export async function markAllAlertsAsRead(): Promise<void> {
 
   const db = getDb();
   if (db) {
-    const snap = await getDocs(collection(db, 'alerts'));
-    for (const d of snap.docs) {
-      if (!d.data().read) {
-        await setDoc(doc(db, 'alerts', d.id), { ...d.data(), read: true });
+    try {
+      const snap = await getDocs(collection(db, 'alerts'));
+      for (const d of snap.docs) {
+        if (!d.data().read) {
+          await setDoc(doc(db, 'alerts', d.id), { ...d.data(), read: true });
+        }
       }
+    } catch {
+      // Non-blocking fallback
     }
   }
   notifyLocalChange();
@@ -1253,7 +1281,11 @@ export async function markAllAlertsAsRead(): Promise<void> {
 export async function deleteAlertRecord(alertId: string): Promise<void> {
   const db = getDb();
   if (db) {
-    await deleteDoc(doc(db, 'alerts', alertId));
+    try {
+      await deleteDoc(doc(db, 'alerts', alertId));
+    } catch {
+      // Non-blocking fallback
+    }
   }
   const alerts = getLocalAlerts().filter((a) => a.id !== alertId);
   localStorage.setItem(LS_ALERTS_KEY, JSON.stringify(alerts));
