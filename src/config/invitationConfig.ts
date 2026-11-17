@@ -71,13 +71,13 @@ export const invitationConfig: InvitationConfig = {
     baptismPlace: 'Parroquia Nuestra Señora de las Estrellas',
     baptismAddress: 'Av. de la Luz 142, Col. Jardines del Cielo',
     baptismMapsUrl: 'https://maps.google.com/?q=Parroquia',
-    receptionTime: '1:30 PM',
+    receptionTime: '2:30 PM',
     receptionPlace: 'Jardín El Pequeño Principito',
     receptionAddress: 'Camino Real a las Estrellas 88, Salón Astral',
     receptionMapsUrl: 'https://maps.google.com/?q=Jardin+Eventos',
     rsvpPhone: '5215512345678',
     rsvpMessage:
-      '¡Hola! Con mucha alegría confirmo mi asistencia al Bautizo y Primer Cumpleaños de Christopher Gabriel 🌟',
+      '¡Hola! Con mucha alegría confirmo mi asistencia a la celebración de Christopher Gabriel 🌟',
   },
   universeCamera: {
     initialPosition: [0, 1.6, 21],

@@ -319,7 +319,11 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           <h2 className="finale-protagonist-name">
             {invitationConfig.protagonistName}
           </h2>
-          <p className="finale-event-subtitle">{invitationConfig.eventTitle}</p>
+          <p className="finale-event-subtitle">
+            {invitation.eventScope === 'party_only'
+              ? 'Celebración de Primer Cumpleaños'
+              : invitationConfig.eventTitle}
+          </p>
         </section>
       )}
 
@@ -484,44 +488,70 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
               </button>
             </div>
 
-            {/* Staggered Section 1: Date */}
+            {/* Staggered Section 1: Date & Scope Pill */}
             <div className="invitation-date-banner stagger-item-1">
               <Calendar size={16} />
               <strong>{invitationConfig.eventDetails.date}</strong>
             </div>
 
-            {/* Staggered Section 2: Baptism & Reception Grid */}
-            <div className="invitation-events-grid">
-              <article className="event-detail-box stagger-item-2">
-                <div className="event-box-title">
-                  <Church size={16} />
-                  <span>Ceremonia de Bautizo</span>
-                </div>
-                <div className="event-time-row">
-                  <Clock size={14} />
-                  <strong>{invitationConfig.eventDetails.baptismTime}</strong>
-                </div>
-                <p className="event-place-name">
-                  {invitationConfig.eventDetails.baptismPlace}
-                </p>
-                <p className="event-place-address">
-                  {invitationConfig.eventDetails.baptismAddress}
-                </p>
-                <a
-                  href={invitationConfig.eventDetails.baptismMapsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-maps-link"
-                >
-                  <MapPin size={14} />
-                  <span>Ubicación en Google Maps</span>
-                </a>
-              </article>
+            <div className="invitation-scope-pill-wrapper stagger-item-1">
+              {invitation.eventScope === 'party_only' ? (
+                <span className="scope-banner-pill is-party">
+                  🎂 Celebración de Primer Cumpleaños • {invitationConfig.eventDetails.receptionTime}
+                </span>
+              ) : (
+                <span className="scope-banner-pill is-full">
+                  🕊️ Almuerzo de Bautizo ({invitationConfig.eventDetails.baptismTime}) y Cumpleaños ({invitationConfig.eventDetails.receptionTime})
+                </span>
+              )}
+            </div>
 
-              <article className="event-detail-box stagger-item-3">
+            {/* Staggered Section 2: Baptism & Reception Grid */}
+            <div
+              className={`invitation-events-grid ${
+                invitation.eventScope === 'party_only' ? 'is-party-only-layout' : ''
+              }`}
+            >
+              {invitation.eventScope !== 'party_only' && (
+                <article className="event-detail-box stagger-item-2">
+                  <div className="event-box-title">
+                    <Church size={16} />
+                    <span>Ceremonia y Almuerzo de Bautizo</span>
+                  </div>
+                  <div className="event-time-row">
+                    <Clock size={14} />
+                    <strong>{invitationConfig.eventDetails.baptismTime}</strong>
+                  </div>
+                  <p className="event-place-name">
+                    {invitationConfig.eventDetails.baptismPlace}
+                  </p>
+                  <p className="event-place-address">
+                    {invitationConfig.eventDetails.baptismAddress}
+                  </p>
+                  <a
+                    href={invitationConfig.eventDetails.baptismMapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-maps-link"
+                  >
+                    <MapPin size={14} />
+                    <span>Ubicación en Google Maps</span>
+                  </a>
+                </article>
+              )}
+
+              <article
+                className={`event-detail-box stagger-item-3 ${
+                  invitation.eventScope === 'party_only' ? 'is-single-event-box' : ''
+                }`}
+              >
                 <div className="event-box-title">
                   <PartyPopper size={16} />
-                  <span>Recepción y Celebración</span>
+                  <span>
+                    {invitation.eventScope === 'party_only'
+                      ? 'Celebración de Cumpleaños'
+                      : 'Recepción y Fiesta de Cumpleaños'}
+                  </span>
                 </div>
                 <div className="event-time-row">
                   <Clock size={14} />
@@ -533,6 +563,11 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 <p className="event-place-address">
                   {invitationConfig.eventDetails.receptionAddress}
                 </p>
+                {invitation.eventScope !== 'party_only' && (
+                  <p className="event-shared-note">
+                    ✨ ¡Al estar invitado al almuerzo, también estás cordialmente invitado a toda la celebración del cumpleaños!
+                  </p>
+                )}
                 <a
                   href={invitationConfig.eventDetails.receptionMapsUrl}
                   target="_blank"

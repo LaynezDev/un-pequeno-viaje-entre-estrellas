@@ -13,6 +13,13 @@ import { getDb } from '../config/firebaseConfig';
 
 export type AttendanceStatus = 'pending' | 'attending' | 'declined';
 
+/**
+ * Ámbito del evento al que está invitado:
+ * - 'full': Almuerzo de Bautizo a las 11:30 AM + Celebración de Cumpleaños a las 2:30 PM (por defecto)
+ * - 'party_only': Únicamente Fiesta de Cumpleaños a las 2:30 PM
+ */
+export type EventScope = 'full' | 'party_only';
+
 export interface InvitationMember {
   id: string;
   name: string;
@@ -58,8 +65,34 @@ export interface InvitationRecord {
   phone?: string;
   /** ID de la mesa asignada para el evento */
   tableId?: string | null;
+  /** Tipo de evento: 'full' (Bautizo 11:30 AM + Cumpleaños 2:30 PM) o 'party_only' (Solo Cumpleaños 2:30 PM) */
+  eventScope?: EventScope;
   respondedAt: string | null;
   createdAt: string;
+}
+
+export interface AdminDevice {
+  id: string;
+  name: string;
+  platform?: string;
+  registeredAt: string;
+  lastActiveAt: string;
+}
+
+export interface RsvpAlertRecord {
+  id: string;
+  invitationId: string;
+  displayTitle: string;
+  summary: string;
+  details: {
+    attending: string[];
+    declined: string[];
+    plusOnes: string[];
+    notes?: string;
+  };
+  eventScope: EventScope;
+  timestamp: string;
+  read: boolean;
 }
 
 export interface GlobalInvitationSettings {
@@ -67,6 +100,12 @@ export interface GlobalInvitationSettings {
   dashboardPin: string;
   /** Fecha límite (ISO string YYYY-MM-DDTHH:mm) hasta la que los invitados pueden modificar su confirmación */
   rsvpDeadline: string;
+  /** Teléfono de WhatsApp de Papá para alertas */
+  adminPhoneDad?: string;
+  /** Teléfono de WhatsApp de Mamá para alertas */
+  adminPhoneMom?: string;
+  /** Lista de dispositivos autorizados de los papás */
+  adminDevices?: AdminDevice[];
   updatedAt: string;
 }
 
@@ -74,10 +113,15 @@ const LS_SETTINGS_KEY = 'cg_inv_settings_v1';
 const LS_FAMILIES_KEY = 'cg_inv_families_v1';
 const LS_INVITATIONS_KEY = 'cg_inv_records_v1';
 const LS_TABLES_KEY = 'cg_inv_tables_v1';
+const LS_ALERTS_KEY = 'cg_inv_alerts_v1';
+const LS_DEVICE_ID_KEY = 'cg_admin_device_id_v1';
 
 const DEFAULT_SETTINGS: GlobalInvitationSettings = {
   dashboardPin: '2026',
   rsvpDeadline: '2026-11-25T23:59',
+  adminPhoneDad: '',
+  adminPhoneMom: '',
+  adminDevices: [],
   updatedAt: new Date().toISOString(),
 };
 
@@ -157,6 +201,7 @@ function getInitialDemoSeed(): {
       notes: '¡Muchas felicidades por el bautizo y primer añito de Christopher Gabriel!',
       phone: '+502 5555 1234',
       tableId: 'tbl-1',
+      eventScope: 'full',
       respondedAt: now,
       createdAt: now,
     },
@@ -175,6 +220,7 @@ function getInitialDemoSeed(): {
       notes: '',
       phone: '+502 5555 5678',
       tableId: 'tbl-1',
+      eventScope: 'full',
       respondedAt: now,
       createdAt: now,
     },
@@ -192,6 +238,7 @@ function getInitialDemoSeed(): {
       notes: '',
       phone: '+502 5555 9012',
       tableId: 'tbl-1',
+      eventScope: 'full',
       respondedAt: null,
       createdAt: now,
     },
@@ -209,6 +256,7 @@ function getInitialDemoSeed(): {
       notes: '',
       phone: '+502 5555 3456',
       tableId: null,
+      eventScope: 'full',
       respondedAt: null,
       createdAt: now,
     },
@@ -226,6 +274,7 @@ function getInitialDemoSeed(): {
       notes: '',
       phone: '+502 5555 7890',
       tableId: 'tbl-2',
+      eventScope: 'party_only',
       respondedAt: null,
       createdAt: now,
     },
@@ -286,6 +335,25 @@ function getLocalTables(): EventTable[] {
   } catch {
     return [];
   }
+}
+
+function getLocalAlerts(): RsvpAlertRecord[] {
+  try {
+    const raw = localStorage.getItem(LS_ALERTS_KEY);
+    return raw ? (JSON.parse(raw) as RsvpAlertRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalAlert(alert: RsvpAlertRecord) {
+  const current = getLocalAlerts();
+  const updated = [alert, ...current.filter((a) => a.id !== alert.id)].slice(
+    0,
+    150
+  );
+  localStorage.setItem(LS_ALERTS_KEY, JSON.stringify(updated));
+  notifyLocalChange();
 }
 
 function notifyLocalChange() {
@@ -611,45 +679,101 @@ export async function submitGuestRsvp(
   const now = new Date().toISOString();
   const db = getDb();
 
+  let existingRecord: InvitationRecord | null = null;
+  let updatedRecord: InvitationRecord;
+
   if (db) {
     const ref = doc(db, 'invitations', invitationId);
     const snap = await getDoc(ref);
     if (!snap.exists()) {
       throw new Error('No se encontró la invitación.');
     }
-    const existing = snap.data() as InvitationRecord;
-    const updated: InvitationRecord = {
-      ...existing,
+    existingRecord = snap.data() as InvitationRecord;
+    updatedRecord = {
+      ...existingRecord,
       members: payload.members,
       selectedPlusOnesCount: Math.min(
-         existing.maxPlusOnes,
+        existingRecord.maxPlusOnes,
         effectivePlusOnesCount
       ),
       plusOneNames: cleanedPlusOneNames,
-      notes: payload.notes ?? existing.notes ?? '',
+      notes: payload.notes ?? existingRecord.notes ?? '',
       respondedAt: now,
     };
-    await setDoc(ref, updated);
-    return;
+    await setDoc(ref, updatedRecord);
+  } else {
+    // Local fallback
+    const all = getLocalInvitations();
+    const idx = all.findIndex((i) => i.id === invitationId);
+    if (idx === -1) throw new Error('No se encontró la invitación.');
+    existingRecord = all[idx];
+    updatedRecord = {
+      ...existingRecord,
+      members: payload.members,
+      selectedPlusOnesCount: Math.min(
+        existingRecord.maxPlusOnes,
+        effectivePlusOnesCount
+      ),
+      plusOneNames: cleanedPlusOneNames,
+      notes: payload.notes ?? existingRecord.notes ?? '',
+      respondedAt: now,
+    };
+    all[idx] = updatedRecord;
+    localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
+    notifyLocalChange();
   }
 
-  // Local fallback
-  const all = getLocalInvitations();
-  const idx = all.findIndex((i) => i.id === invitationId);
-  if (idx === -1) throw new Error('No se encontró la invitación.');
-  all[idx] = {
-    ...all[idx],
-    members: payload.members,
-    selectedPlusOnesCount: Math.min(
-      all[idx].maxPlusOnes,
-      effectivePlusOnesCount
-    ),
-    plusOneNames: cleanedPlusOneNames,
-    notes: payload.notes ?? all[idx].notes ?? '',
-    respondedAt: now,
-  };
-  localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(all));
-  notifyLocalChange();
+  // Generate real-time notification alert record for parents
+  if (existingRecord) {
+    const attendingMembers = payload.members
+      .filter((m) => m.status === 'attending')
+      .map((m) => m.name);
+    const declinedMembers = payload.members
+      .filter((m) => m.status === 'declined')
+      .map((m) => m.name);
+    const scope: EventScope = existingRecord.eventScope || 'full';
+    const scopeLabel =
+      scope === 'party_only'
+        ? 'Cumpleaños (2:30 PM)'
+        : 'Bautizo (11:30 AM) + Cumpleaños';
+
+    const summaryParts: string[] = [];
+    if (attendingMembers.length > 0) {
+      summaryParts.push(`${attendingMembers.length} asiste(n) [${attendingMembers.join(', ')}]`);
+    }
+    if (declinedMembers.length > 0) {
+      summaryParts.push(`${declinedMembers.length} no asiste(n) [${declinedMembers.join(', ')}]`);
+    }
+    if (cleanedPlusOneNames.length > 0) {
+      summaryParts.push(`+${cleanedPlusOneNames.length} extra (${cleanedPlusOneNames.join(', ')})`);
+    }
+
+    const alertRecord: RsvpAlertRecord = {
+      id: `alert-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      invitationId,
+      displayTitle: existingRecord.displayTitle,
+      summary: `${existingRecord.displayTitle} confirmó: ${summaryParts.join(' • ') || 'Sin cambios'} (${scopeLabel})`,
+      details: {
+        attending: attendingMembers,
+        declined: declinedMembers,
+        plusOnes: cleanedPlusOneNames,
+        notes: payload.notes ?? existingRecord.notes ?? '',
+      },
+      eventScope: scope,
+      timestamp: now,
+      read: false,
+    };
+
+    saveLocalAlert(alertRecord);
+
+    if (db) {
+      try {
+        await setDoc(doc(db, 'alerts', alertRecord.id), alertRecord);
+      } catch (err) {
+        console.warn('No se pudo guardar la alerta en Firestore alerts:', err);
+      }
+    }
+  }
 }
 
 // ==================== DASHBOARD CRUD OPERATIONS ====================
@@ -1002,5 +1126,136 @@ export async function seedPicapiedraExampleToDatabase(): Promise<void> {
   localStorage.setItem(LS_FAMILIES_KEY, JSON.stringify(seed.families));
   localStorage.setItem(LS_TABLES_KEY, JSON.stringify(seed.tables));
   localStorage.setItem(LS_INVITATIONS_KEY, JSON.stringify(seed.invitations));
+  notifyLocalChange();
+}
+
+// ==================== ALERTS & DEVICE NOTIFICATIONS ====================
+
+/**
+ * Gets or creates a unique persistent ID for this admin device / browser instance
+ */
+export function getLocalDeviceId(): string {
+  let id = localStorage.getItem(LS_DEVICE_ID_KEY);
+  if (!id) {
+    id = `dev-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    localStorage.setItem(LS_DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+/**
+ * Registers an authorized admin device (Dad / Mom phone) in Global Settings
+ */
+export async function registerAdminDevice(device: AdminDevice): Promise<void> {
+  const current = await fetchGlobalSettings();
+  const existingDevices = current.adminDevices || [];
+  const idx = existingDevices.findIndex((d) => d.id === device.id);
+  const updatedDevices = [...existingDevices];
+  if (idx >= 0) {
+    updatedDevices[idx] = { ...existingDevices[idx], ...device };
+  } else {
+    updatedDevices.push(device);
+  }
+  await updateGlobalSettings({ adminDevices: updatedDevices });
+}
+
+/**
+ * Removes an authorized admin device
+ */
+export async function unregisterAdminDevice(deviceId: string): Promise<void> {
+  const current = await fetchGlobalSettings();
+  const existingDevices = current.adminDevices || [];
+  const updatedDevices = existingDevices.filter((d) => d.id !== deviceId);
+  await updateGlobalSettings({ adminDevices: updatedDevices });
+}
+
+/**
+ * Subscribes in real-time to RSVP alerts generated by guests
+ */
+export function subscribeToAlerts(
+  callback: (alerts: RsvpAlertRecord[]) => void
+): () => void {
+  const db = getDb();
+  if (db) {
+    const unsub = onSnapshot(collection(db, 'alerts'), (snap) => {
+      const remoteAlerts = snap.docs.map((d) => d.data() as RsvpAlertRecord);
+      remoteAlerts.sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      callback(remoteAlerts);
+    });
+    return unsub;
+  }
+
+  const emitLocal = () => {
+    const alerts = getLocalAlerts();
+    alerts.sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    callback(alerts);
+  };
+  emitLocal();
+  window.addEventListener('cg-local-db-updated', emitLocal);
+  window.addEventListener('storage', emitLocal);
+  return () => {
+    window.removeEventListener('cg-local-db-updated', emitLocal);
+    window.removeEventListener('storage', emitLocal);
+  };
+}
+
+/**
+ * Marks a specific alert as read
+ */
+export async function markAlertAsRead(alertId: string): Promise<void> {
+  const db = getDb();
+  if (db) {
+    const ref = doc(db, 'alerts', alertId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await setDoc(ref, { ...snap.data(), read: true });
+    }
+  }
+
+  const alerts = getLocalAlerts();
+  const idx = alerts.findIndex((a) => a.id === alertId);
+  if (idx >= 0) {
+    alerts[idx].read = true;
+    localStorage.setItem(LS_ALERTS_KEY, JSON.stringify(alerts));
+    notifyLocalChange();
+  }
+}
+
+/**
+ * Marks all alerts as read
+ */
+export async function markAllAlertsAsRead(): Promise<void> {
+  const alerts = getLocalAlerts();
+  const updated = alerts.map((a) => ({ ...a, read: true }));
+  localStorage.setItem(LS_ALERTS_KEY, JSON.stringify(updated));
+
+  const db = getDb();
+  if (db) {
+    const snap = await getDocs(collection(db, 'alerts'));
+    for (const d of snap.docs) {
+      if (!d.data().read) {
+        await setDoc(doc(db, 'alerts', d.id), { ...d.data(), read: true });
+      }
+    }
+  }
+  notifyLocalChange();
+}
+
+/**
+ * Deletes a specific alert
+ */
+export async function deleteAlertRecord(alertId: string): Promise<void> {
+  const db = getDb();
+  if (db) {
+    await deleteDoc(doc(db, 'alerts', alertId));
+  }
+  const alerts = getLocalAlerts().filter((a) => a.id !== alertId);
+  localStorage.setItem(LS_ALERTS_KEY, JSON.stringify(alerts));
   notifyLocalChange();
 }

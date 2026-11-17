@@ -27,24 +27,40 @@ import {
   XCircle,
   Clock,
   FileSpreadsheet,
+  Bell,
+  Smartphone,
+  Send,
+  Volume2,
+  ShieldCheck,
+  CheckCheck,
 } from 'lucide-react';
 import {
+  AdminDevice,
   AttendanceStatus,
+  EventScope,
   EventTable,
   FamilyGroup,
   FirestoreInitStatus,
   GlobalInvitationSettings,
   InvitationMember,
   InvitationRecord,
+  RsvpAlertRecord,
   assignInvitationToTable,
   calculateTableOccupancy,
+  deleteAlertRecord,
   deleteFamilyGroup,
   deleteInvitationRecord,
   deleteTable,
   generateInvitationToken,
+  getLocalDeviceId,
   initializeFirestoreSettings,
+  markAlertAsRead,
+  markAllAlertsAsRead,
+  registerAdminDevice,
   seedPicapiedraExampleToDatabase,
+  subscribeToAlerts,
   subscribeToDashboardData,
+  unregisterAdminDevice,
   updateGlobalSettings,
   updateInvitationPhone,
   updatePersonPhone,
@@ -59,6 +75,7 @@ import {
   saveRuntimeFirebaseCredentials,
 } from '../config/firebaseConfig';
 import { invitationConfig } from '../config/invitationConfig';
+import { ambientAudio } from '../audio/AmbientAudio';
 
 const SESSION_AUTH_KEY = 'cg_dashboard_unlocked_v1';
 
@@ -76,6 +93,7 @@ interface FlattenedGuest {
   tableId?: string | null;
   familyGroupId?: string | null;
   familyName?: string;
+  eventScope?: EventScope;
 }
 
 export const DashboardPage: React.FC = () => {
@@ -90,14 +108,30 @@ export const DashboardPage: React.FC = () => {
   const [settings, setSettings] = useState<GlobalInvitationSettings>({
     dashboardPin: '2026',
     rsvpDeadline: '2026-11-25T23:59',
+    adminPhoneDad: '',
+    adminPhoneMom: '',
+    adminDevices: [],
     updatedAt: '',
   });
   const [families, setFamilies] = useState<FamilyGroup[]>([]);
   const [invitations, setInvitations] = useState<InvitationRecord[]>([]);
   const [tables, setTables] = useState<EventTable[]>([]);
   const [activeTab, setActiveTab] = useState<
-    'guests' | 'tables' | 'invitations' | 'families' | 'settings'
+    'guests' | 'alerts' | 'tables' | 'invitations' | 'families' | 'settings'
   >('guests');
+
+  // Real-time Alerts and Notifications
+  const [alerts, setAlerts] = useState<RsvpAlertRecord[]>([]);
+  const [activeToast, setActiveToast] = useState<RsvpAlertRecord | null>(null);
+  const [adminPhoneDad, setAdminPhoneDad] = useState('');
+  const [adminPhoneMom, setAdminPhoneMom] = useState('');
+  const [deviceNickname, setDeviceNickname] = useState('Celular de Papá');
+  const [notificationPerm, setNotificationPerm] =
+    useState<NotificationPermission>(() => {
+      return typeof window !== 'undefined' && 'Notification' in window
+        ? Notification.permission
+        : 'default';
+    });
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -108,6 +142,9 @@ export const DashboardPage: React.FC = () => {
   >('ALL');
   const [guestTableFilter, setGuestTableFilter] = useState<string>('ALL');
   const [guestFamilyFilter, setGuestFamilyFilter] = useState<string>('ALL');
+  const [guestScopeFilter, setGuestScopeFilter] = useState<
+    'ALL' | 'full' | 'party_only'
+  >('ALL');
   const [guestViewMode, setGuestViewMode] = useState<
     'by-person' | 'by-invitation' | 'by-family'
   >('by-person');
@@ -120,6 +157,7 @@ export const DashboardPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [displayTitle, setDisplayTitle] = useState('');
   const [selectedFamilyId, setSelectedFamilyId] = useState<string>('');
+  const [invEventScope, setInvEventScope] = useState<EventScope>('full');
   const [maxPlusOnes, setMaxPlusOnes] = useState<0 | 1 | 2 | 3>(0);
   const [customToken, setCustomToken] = useState('');
   const [memberNames, setMemberNames] = useState<string[]>(['']);
@@ -168,12 +206,189 @@ export const DashboardPage: React.FC = () => {
       setSettings(data.settings);
       setDeadlineInput(data.settings.rsvpDeadline);
       setNewPinInput(data.settings.dashboardPin);
+      if (data.settings.adminPhoneDad !== undefined) {
+        setAdminPhoneDad(data.settings.adminPhoneDad);
+      }
+      if (data.settings.adminPhoneMom !== undefined) {
+        setAdminPhoneMom(data.settings.adminPhoneMom);
+      }
       setFamilies(data.families);
       setInvitations(data.invitations);
       setTables(data.tables);
     });
     return () => unsub();
   }, [unlocked]);
+
+  // Real-time listener for RSVP alerts with sound & native device notifications
+  const previousAlertIdsRef = React.useRef<Set<string>>(new Set());
+  const initialAlertsLoadedRef = React.useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!unlocked) return;
+    const unsub = subscribeToAlerts((incomingAlerts) => {
+      setAlerts(incomingAlerts);
+
+      if (!initialAlertsLoadedRef.current) {
+        initialAlertsLoadedRef.current = true;
+        previousAlertIdsRef.current = new Set(incomingAlerts.map((a) => a.id));
+        return;
+      }
+
+      const newAlerts = incomingAlerts.filter(
+        (a) => !previousAlertIdsRef.current.has(a.id)
+      );
+
+      if (newAlerts.length > 0) {
+        const latest = newAlerts[0];
+        ambientAudio.playNotificationChime();
+        setActiveToast(latest);
+        setTimeout(() => setActiveToast(null), 7000);
+
+        if (
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
+          try {
+            new Notification(`🌟 Confirmación: ${latest.displayTitle}`, {
+              body: latest.summary,
+              icon: '/favicon.ico',
+            });
+          } catch (e) {
+            console.warn('Native notification error:', e);
+          }
+        }
+      }
+
+      previousAlertIdsRef.current = new Set(incomingAlerts.map((a) => a.id));
+    });
+
+    return () => unsub();
+  }, [unlocked]);
+
+  const thisDeviceId = useMemo(() => getLocalDeviceId(), []);
+  const registeredDevices = useMemo(
+    () => settings.adminDevices || [],
+    [settings.adminDevices]
+  );
+  const isThisDeviceRegistered = useMemo(() => {
+    return registeredDevices.some((d) => d.id === thisDeviceId);
+  }, [registeredDevices, thisDeviceId]);
+
+  const handleRegisterThisDevice = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      alert(
+        'Este navegador no soporta notificaciones de sistema. En iPhone, asegúrate de guardar la página en Pantalla de Inicio (PWA) o usar iOS 16.4+'
+      );
+      return;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPerm(permission);
+
+      if (permission === 'granted') {
+        const nick = deviceNickname.trim() || 'Celular Autorizado';
+        await registerAdminDevice({
+          id: thisDeviceId,
+          name: nick,
+          platform: navigator.userAgent.includes('iPhone')
+            ? 'iPhone (iOS)'
+            : navigator.userAgent.includes('Android')
+            ? 'Android'
+            : navigator.platform || 'Móvil',
+          registeredAt: new Date().toISOString(),
+          lastActiveAt: new Date().toISOString(),
+        });
+
+        ambientAudio.playNotificationChime();
+        try {
+          new Notification('🔔 ¡Notificaciones Activadas!', {
+            body: `Este celular (${nick}) recibirá alertas cuando un invitado confirme su asistencia.`,
+            icon: '/favicon.ico',
+          });
+        } catch {
+          // ignore
+        }
+        alert(`✅ ¡Notificaciones activadas con éxito para "${nick}"!`);
+      } else {
+        alert(
+          '⚠️ Permiso no concedido. Para activarlas en tu celular, ve a la configuración del navegador (Chrome o Safari) y permite las notificaciones para este sitio.'
+        );
+      }
+    } catch (e) {
+      alert('Error al solicitar permiso de notificaciones: ' + String(e));
+    }
+  };
+
+  const handleUnregisterDevice = async (devId: string) => {
+    if (
+      !window.confirm(
+        '¿Deseas desvincular este dispositivo de la lista de teléfonos autorizados?'
+      )
+    )
+      return;
+    await unregisterAdminDevice(devId);
+  };
+
+  const handleTestChime = () => {
+    ambientAudio.playNotificationChime();
+    if (
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'granted'
+    ) {
+      try {
+        new Notification('🔔 Prueba de Sonido y Alerta', {
+          body: '¡Todo listo! Tu celular reproducirá esta alerta cuando un invitado confirme.',
+          icon: '/favicon.ico',
+        });
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const handleSaveAdminPhones = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await updateGlobalSettings({
+      adminPhoneDad: adminPhoneDad.trim(),
+      adminPhoneMom: adminPhoneMom.trim(),
+    });
+    alert('✅ Teléfonos de WhatsApp de Papá y Mamá guardados con éxito.');
+  };
+
+  const handleForwardAlertWhatsApp = (
+    target: 'dad' | 'mom',
+    al: RsvpAlertRecord
+  ) => {
+    const targetPhone =
+      target === 'dad' ? settings.adminPhoneDad : settings.adminPhoneMom;
+    const cleanPhone = cleanPhoneNumber(targetPhone);
+    const text = `🔔 *Alerta de Confirmación de Christopher Gabriel:*\n\n${al.summary}\n\n📅 Fecha: ${new Date(
+      al.timestamp
+    ).toLocaleString()}${
+      al.details.notes ? `\n💬 Mensaje del invitado: "${al.details.notes}"` : ''
+    }`;
+    let waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    if (cleanPhone.length >= 8) {
+      waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
+    }
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleMarkAlertRead = async (alertId: string) => {
+    await markAlertAsRead(alertId);
+  };
+
+  const handleMarkAllRead = async () => {
+    await markAllAlertsAsRead();
+  };
+
+  const handleDeleteAlert = async (alertId: string) => {
+    if (!window.confirm('¿Deseas eliminar este registro de alerta?')) return;
+    await deleteAlertRecord(alertId);
+  };
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,12 +417,24 @@ export const DashboardPage: React.FC = () => {
     let pendingMembers = 0;
     let totalPlusOnesConfirmed = 0;
 
+    let fullScopeAttending = 0;
+    let partyOnlyScopeAttending = 0;
+    let fullScopeInvs = 0;
+    let partyOnlyScopeInvs = 0;
+
     invitations.forEach((inv) => {
+      const isPartyOnly = inv.eventScope === 'party_only';
+      if (isPartyOnly) partyOnlyScopeInvs++;
+      else fullScopeInvs++;
+
       let anyAttending = false;
+      let attendingInThisInv = 0;
+
       inv.members.forEach((m) => {
         totalMembers++;
         if (m.status === 'attending') {
           attendingMembers++;
+          attendingInThisInv++;
           anyAttending = true;
         } else if (m.status === 'declined') {
           declinedMembers++;
@@ -215,8 +442,18 @@ export const DashboardPage: React.FC = () => {
           pendingMembers++;
         }
       });
-      if (anyAttending && inv.selectedPlusOnesCount > 0) {
-        totalPlusOnesConfirmed += inv.selectedPlusOnesCount;
+
+      const plusCount =
+        anyAttending && inv.selectedPlusOnesCount > 0
+          ? inv.selectedPlusOnesCount
+          : 0;
+      totalPlusOnesConfirmed += plusCount;
+
+      const totalAttForThisInv = attendingInThisInv + plusCount;
+      if (isPartyOnly) {
+        partyOnlyScopeAttending += totalAttForThisInv;
+      } else {
+        fullScopeAttending += totalAttForThisInv;
       }
     });
 
@@ -227,7 +464,9 @@ export const DashboardPage: React.FC = () => {
     let attendingWithTable = 0;
     invitations.forEach((inv) => {
       if (inv.tableId) {
-        const attMembers = inv.members.filter((m) => m.status === 'attending').length;
+        const attMembers = inv.members.filter(
+          (m) => m.status === 'attending'
+        ).length;
         const plus = attMembers > 0 ? inv.selectedPlusOnesCount : 0;
         attendingWithTable += attMembers + plus;
       }
@@ -244,6 +483,10 @@ export const DashboardPage: React.FC = () => {
       pendingMembers,
       attendingWithTable,
       attendingWithoutTable: Math.max(0, attendingTotal - attendingWithTable),
+      fullScopeInvs,
+      partyOnlyScopeInvs,
+      fullScopeAttending,
+      partyOnlyScopeAttending,
     };
   }, [invitations]);
 
@@ -262,7 +505,10 @@ export const DashboardPage: React.FC = () => {
       else if (occ.confirmedCount >= tbl.capacity) fullTablesCount++;
     });
 
-    const totalSeatsAvailable = Math.max(0, totalSalonCapacity - totalSeatsOccupied);
+    const totalSeatsAvailable = Math.max(
+      0,
+      totalSalonCapacity - totalSeatsOccupied
+    );
 
     return {
       totalTables: tables.length,
@@ -280,6 +526,7 @@ export const DashboardPage: React.FC = () => {
 
     invitations.forEach((inv) => {
       const famName = families.find((f) => f.id === inv.familyGroupId)?.name;
+      const scope = inv.eventScope || 'full';
 
       // Titulares de la invitación
       inv.members.forEach((m, idx) => {
@@ -296,12 +543,17 @@ export const DashboardPage: React.FC = () => {
           tableId: inv.tableId,
           familyGroupId: inv.familyGroupId,
           familyName: famName,
+          eventScope: scope,
         });
       });
 
       // Acompañantes confirmados (+1, +2, +3) si algún titular asiste
       const anyAttending = inv.members.some((m) => m.status === 'attending');
-      if (anyAttending && inv.selectedPlusOnesCount > 0 && inv.plusOneNames.length > 0) {
+      if (
+        anyAttending &&
+        inv.selectedPlusOnesCount > 0 &&
+        inv.plusOneNames.length > 0
+      ) {
         inv.plusOneNames.forEach((plusName, pIdx) => {
           list.push({
             uniqueId: `plus-${inv.id}-${pIdx}`,
@@ -316,6 +568,7 @@ export const DashboardPage: React.FC = () => {
             tableId: inv.tableId,
             familyGroupId: inv.familyGroupId,
             familyName: famName,
+            eventScope: scope,
           });
         });
       }
@@ -344,6 +597,14 @@ export const DashboardPage: React.FC = () => {
         return false;
       }
 
+      // Filtro de tipo de evento / horario
+      if (
+        guestScopeFilter !== 'ALL' &&
+        (g.eventScope || 'full') !== guestScopeFilter
+      ) {
+        return false;
+      }
+
       // Filtro de mesa
       if (guestTableFilter === 'WITH_TABLE' && !g.tableId) return false;
       if (guestTableFilter === 'WITHOUT_TABLE' && g.tableId) return false;
@@ -359,7 +620,10 @@ export const DashboardPage: React.FC = () => {
       // Filtro de familia
       if (guestFamilyFilter !== 'ALL') {
         if (guestFamilyFilter === 'NONE' && g.familyGroupId) return false;
-        if (guestFamilyFilter !== 'NONE' && g.familyGroupId !== guestFamilyFilter) {
+        if (
+          guestFamilyFilter !== 'NONE' &&
+          g.familyGroupId !== guestFamilyFilter
+        ) {
           return false;
         }
       }
@@ -370,6 +634,7 @@ export const DashboardPage: React.FC = () => {
     flattenedGuests,
     guestSearch,
     guestStatusFilter,
+    guestScopeFilter,
     guestTableFilter,
     guestFamilyFilter,
   ]);
@@ -386,7 +651,10 @@ export const DashboardPage: React.FC = () => {
 
   const handleShareWhatsApp = (inv: InvitationRecord, personPhone?: string) => {
     const url = buildInvitationUrl(inv.token);
-    const text = `✨ Hola *${inv.displayTitle}*, te compartimos tu invitación personal e interactiva para el Bautizo y Primer Cumpleaños de *${invitationConfig.protagonistName}*:\n\n👉 ${url}`;
+    const isPartyOnly = inv.eventScope === 'party_only';
+    const text = isPartyOnly
+      ? `✨ Hola *${inv.displayTitle}*, te compartimos tu invitación personal e interactiva para la Celebración del 1er Cumpleaños de *${invitationConfig.protagonistName}* 🎂\n\n⏰ Horario: 2:30 PM\n👉 ${url}`
+      : `✨ Hola *${inv.displayTitle}*, te compartimos tu invitación personal e interactiva para el Almuerzo de Bautizo (11:30 AM) y Celebración de Cumpleaños (2:30 PM) de *${invitationConfig.protagonistName}* 🕊️🎂\n\n👉 ${url}`;
     const phoneToUse = personPhone || inv.phone;
     const cleanPhone = cleanPhoneNumber(phoneToUse);
 
@@ -408,7 +676,9 @@ export const DashboardPage: React.FC = () => {
   const handleExportCsv = () => {
     const headers = [
       'Invitado / Nombre',
-      'Tipo',
+      'Tipo de Asistente',
+      'Tipo de Invitación',
+      'Horario de Inicio',
       'Estado Asistencia',
       'Teléfono / WhatsApp',
       'Mesa Asignada',
@@ -418,20 +688,31 @@ export const DashboardPage: React.FC = () => {
     ];
 
     const rows = filteredGuests.map((g) => {
-      const tableName =
-        tables.find((t) => t.id === g.tableId)?.name || 'Sin mesa asignada';
+      const isPartyOnly = g.eventScope === 'party_only';
+      const scopeLabel = isPartyOnly
+        ? 'Solo Cumpleaños'
+        : 'Bautizo + Cumpleaños';
+      const timeLabel = isPartyOnly
+        ? '2:30 PM'
+        : '11:30 AM (Bautizo) / 2:30 PM (Cumpleaños)';
+      const typeLabel = g.isPlusOne
+        ? `Acompañante (+${(g.plusOneIndex ?? 0) + 1})`
+        : 'Titular';
       const statusLabel =
         g.status === 'attending'
           ? 'Asiste'
           : g.status === 'declined'
           ? 'No asiste'
           : 'Pendiente';
-      const typeLabel = g.isPlusOne ? 'Acompañante (+1)' : 'Titular';
+      const tableName =
+        tables.find((t) => t.id === g.tableId)?.name || 'Sin mesa asignada';
       const invUrl = buildInvitationUrl(g.token);
 
       return [
         `"${g.name.replace(/"/g, '""')}"`,
         `"${typeLabel}"`,
+        `"${scopeLabel}"`,
+        `"${timeLabel}"`,
         `"${statusLabel}"`,
         `"${(g.phone || '').replace(/"/g, '""')}"`,
         `"${tableName.replace(/"/g, '""')}"`,
@@ -566,6 +847,7 @@ export const DashboardPage: React.FC = () => {
     setEditingId(null);
     setDisplayTitle('');
     setSelectedFamilyId('');
+    setInvEventScope('full');
     setMaxPlusOnes(0);
     setCustomToken('');
     setMemberNames(['']);
@@ -579,6 +861,7 @@ export const DashboardPage: React.FC = () => {
     setEditingId(inv.id);
     setDisplayTitle(inv.displayTitle);
     setSelectedFamilyId(inv.familyGroupId ?? '');
+    setInvEventScope(inv.eventScope || 'full');
     setMaxPlusOnes(inv.maxPlusOnes);
     setCustomToken(inv.token);
     setMemberNames(inv.members.map((m) => m.name));
@@ -658,6 +941,7 @@ export const DashboardPage: React.FC = () => {
       notes: existing?.notes ?? '',
       phone: invPhone.trim() || members[0]?.phone || '',
       tableId: invTableId || null,
+      eventScope: invEventScope,
       respondedAt: existing?.respondedAt ?? null,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
@@ -824,6 +1108,23 @@ export const DashboardPage: React.FC = () => {
 
           <button
             type="button"
+            className={`btn-topbar-bell ${
+              alerts.some((a) => !a.read) ? 'has-unread-pulse' : ''
+            }`}
+            onClick={() => setActiveTab('alerts')}
+            title="Centro de Alertas de Confirmación"
+          >
+            <Bell size={15} />
+            <span>Alertas</span>
+            {alerts.filter((a) => !a.read).length > 0 && (
+              <span className="topbar-unread-pill">
+                {alerts.filter((a) => !a.read).length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             className="btn-secondary-journey"
             onClick={() => {
               sessionStorage.removeItem(SESSION_AUTH_KEY);
@@ -839,16 +1140,20 @@ export const DashboardPage: React.FC = () => {
       {/* Real-time KPI Metrics Grid */}
       <section className="dashboard-stats-grid">
         <div className="stat-card">
-          <span>Total Personas Registradas</span>
+          <span>Total Registrados</span>
           <strong>{stats.totalPeople}</strong>
           <small>{stats.totalInvitations} invitaciones / tokens</small>
         </div>
+        <div className="stat-card is-scope-full">
+          <span>🕊️ Bautizo y Almuerzo (11:30 AM)</span>
+          <strong>{stats.fullScopeAttending}</strong>
+          <small>Confirmados para el almuerzo</small>
+        </div>
         <div className="stat-card is-attending">
-          <span>Confirmados que Asisten</span>
+          <span>🎂 Fiesta Cumpleaños (2:30 PM)</span>
           <strong>{stats.attendingTotal}</strong>
           <small>
-            {stats.attendingMembers} titulares + {stats.totalPlusOnesConfirmed}{' '}
-            acompañantes (+1/+2/+3)
+            {stats.fullScopeAttending} del almuerzo + {stats.partyOnlyScopeAttending} solo cumpleaños
           </small>
         </div>
         <div className="stat-card is-declined">
@@ -857,7 +1162,7 @@ export const DashboardPage: React.FC = () => {
           <small>Confirmaron inasistencia</small>
         </div>
         <div className="stat-card is-pending">
-          <span>Pendientes de Responder</span>
+          <span>Pendientes</span>
           <strong>{stats.pendingMembers}</strong>
           <small>Límite: {settings.rsvpDeadline.replace('T', ' ')}</small>
         </div>
@@ -871,7 +1176,21 @@ export const DashboardPage: React.FC = () => {
           onClick={() => setActiveTab('guests')}
         >
           <ClipboardList size={16} />
-          <span>Lista General de Invitados ({flattenedGuests.length})</span>
+          <span>Lista de Invitados ({flattenedGuests.length})</span>
+        </button>
+
+        <button
+          type="button"
+          className={`tab-alerts-btn ${activeTab === 'alerts' ? 'is-active' : ''}`}
+          onClick={() => setActiveTab('alerts')}
+        >
+          <Bell size={16} />
+          <span>Alertas y Dispositivos</span>
+          {alerts.filter((a) => !a.read).length > 0 && (
+            <span className="tab-unread-counter">
+              {alerts.filter((a) => !a.read).length}
+            </span>
+          )}
         </button>
 
         <button
@@ -1045,6 +1364,19 @@ export const DashboardPage: React.FC = () => {
                   </option>
                 ))}
               </select>
+
+              <select
+                value={guestScopeFilter}
+                onChange={(e) =>
+                  setGuestScopeFilter(
+                    e.target.value as 'ALL' | 'full' | 'party_only'
+                  )
+                }
+              >
+                <option value="ALL">Todos los eventos</option>
+                <option value="full">🕊️ Bautizo + Cumpleaños (11:30 AM)</option>
+                <option value="party_only">🎂 Solo Cumpleaños (2:30 PM)</option>
+              </select>
             </div>
           </div>
 
@@ -1055,6 +1387,7 @@ export const DashboardPage: React.FC = () => {
                 <thead>
                   <tr>
                     <th>Persona / Invitado</th>
+                    <th>Evento / Horario</th>
                     <th>Familia / Grupo</th>
                     <th>Estado</th>
                     <th>Teléfono / WhatsApp</th>
@@ -1065,7 +1398,7 @@ export const DashboardPage: React.FC = () => {
                 <tbody>
                   {filteredGuests.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', padding: '30px' }}>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '30px' }}>
                         No se encontraron invitados con los filtros seleccionados.
                       </td>
                     </tr>
@@ -1087,6 +1420,25 @@ export const DashboardPage: React.FC = () => {
                                 <span className="badge-tag-companion">Acompañante (+1)</span>
                               )}
                             </div>
+                          </td>
+
+                          {/* Evento / Horario */}
+                          <td>
+                            {guest.eventScope === 'party_only' ? (
+                              <span
+                                className="scope-tag is-party"
+                                title="Invitado a la Celebración de Cumpleaños a las 2:30 PM"
+                              >
+                                🎂 Cumpleaños (2:30 PM)
+                              </span>
+                            ) : (
+                              <span
+                                className="scope-tag is-full"
+                                title="Invitado al Almuerzo de Bautizo (11:30 AM) y Fiesta de Cumpleaños"
+                              >
+                                🕊️ Bautizo (11:30 AM) + Cumple
+                              </span>
+                            )}
                           </td>
 
                           {/* Familia */}
@@ -1832,6 +2184,297 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {/* ============================================================ */}
+      {/* ============== TAB: ALERTAS Y DISPOSITIVOS ================= */}
+      {/* ============================================================ */}
+      {activeTab === 'alerts' && (
+        <section className="dashboard-panel">
+          <div className="panel-header-with-actions">
+            <div>
+              <h2>🔔 Centro de Notificaciones y Alertas</h2>
+              <p className="panel-helper" style={{ marginBottom: 0 }}>
+                Recibe notificaciones en tu celular cada vez que un invitado confirme o modifique su asistencia.
+              </p>
+            </div>
+            {alerts.length > 0 && (
+              <button
+                type="button"
+                className="btn-mark-all-read"
+                onClick={handleMarkAllRead}
+              >
+                <CheckCheck size={16} />
+                <span>Marcar todas como leídas</span>
+              </button>
+            )}
+          </div>
+
+          {/* Banner explicativo de cómo funcionan las notificaciones para ciertos dispositivos */}
+          <div className="alerts-explanation-box">
+            <div className="explanation-icon">
+              <ShieldCheck size={28} />
+            </div>
+            <div>
+              <h4>¿Cómo funciona la activación de notificaciones solo para ustedes?</h4>
+              <p>
+                Las notificaciones web se vinculan <strong>exclusivamente al navegador del teléfono</strong> donde tú o tu esposa inicien sesión con el PIN y pulsen el botón <em>"Activar Notificaciones en este Celular"</em>. Los invitados que entran a su enlace personal nunca tienen acceso a este panel y sus dispositivos jamás recibirán estas alertas.
+              </p>
+            </div>
+          </div>
+
+          <div className="alerts-dashboard-grid">
+            {/* Tarjeta de Registro del Dispositivo Actual */}
+            <div className="admin-device-card">
+              <div className="device-card-header">
+                <Smartphone size={20} />
+                <h3>Notificaciones en este Dispositivo</h3>
+              </div>
+
+              <div className="device-status-indicator">
+                <span
+                  className={`status-dot ${
+                    notificationPerm === 'granted' && isThisDeviceRegistered
+                      ? 'is-active'
+                      : 'is-inactive'
+                  }`}
+                />
+                <span>
+                  {notificationPerm === 'granted' && isThisDeviceRegistered
+                    ? '✅ Notificaciones activas en este celular'
+                    : notificationPerm === 'denied'
+                    ? '❌ Permiso bloqueado en el navegador de este teléfono'
+                    : '⚠️ Notificaciones no activas aún en este teléfono'}
+                </span>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '12px' }}>
+                <label>Nombre o etiqueta de este teléfono</label>
+                <input
+                  type="text"
+                  placeholder="Ej. Celular de Papá o Celular de Mamá"
+                  value={deviceNickname}
+                  onChange={(e) => setDeviceNickname(e.target.value)}
+                />
+              </div>
+
+              <div className="device-action-buttons">
+                <button
+                  type="button"
+                  className="btn-enable-push"
+                  onClick={handleRegisterThisDevice}
+                >
+                  <Bell size={16} />
+                  <span>Activar Notificaciones en este Celular</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-test-chime"
+                  onClick={handleTestChime}
+                  title="Reproducir campana estelar de prueba"
+                >
+                  <Volume2 size={16} />
+                  <span>Probar Sonido</span>
+                </button>
+              </div>
+
+              {/* Lista de Dispositivos Registrados de los Papás */}
+              <div className="registered-devices-sublist">
+                <h4>Teléfonos Autorizados Registrados ({registeredDevices.length}):</h4>
+                {registeredDevices.length === 0 ? (
+                  <p className="no-devices-text">
+                    No hay teléfonos registrados todavía. Abre /mi_dashboard en el celular de papá y en el de mamá, y pulsa el botón dorado arriba.
+                  </p>
+                ) : (
+                  <ul>
+                    {registeredDevices.map((dev) => (
+                      <li key={dev.id}>
+                        <div>
+                          <strong>{dev.name}</strong>
+                          <small>
+                            {dev.platform} • Registrado el{' '}
+                            {new Date(dev.registeredAt).toLocaleDateString()}
+                          </small>
+                          {dev.id === thisDeviceId && (
+                            <span className="current-device-tag">Este teléfono</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-delete-device"
+                          onClick={() => handleUnregisterDevice(dev.id)}
+                          title="Desvincular este dispositivo"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            {/* Tarjeta de Configuración de WhatsApp de los Papás */}
+            <div className="admin-device-card">
+              <div className="device-card-header">
+                <MessageCircle size={20} />
+                <h3>Teléfonos de WhatsApp (Papá y Mamá)</h3>
+              </div>
+              <p className="device-card-help">
+                Configura los números de WhatsApp para reenviarse alertas de confirmación con 1 clic:
+              </p>
+
+              <form onSubmit={handleSaveAdminPhones} className="dashboard-form">
+                <div className="form-group">
+                  <label>
+                    <Phone size={14} /> WhatsApp Papá
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="Ej. +502 5555 1234"
+                    value={adminPhoneDad}
+                    onChange={(e) => setAdminPhoneDad(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>
+                    <Phone size={14} /> WhatsApp Mamá
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="Ej. +502 5555 5678"
+                    value={adminPhoneMom}
+                    onChange={(e) => setAdminPhoneMom(e.target.value)}
+                  />
+                </div>
+
+                <button type="submit" className="btn-save-settings">
+                  <Check size={16} />
+                  <span>Guardar Números de WhatsApp</span>
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* Feed de Alertas / Historial en Vivo */}
+          <div className="alerts-feed-section">
+            <div className="feed-header">
+              <h3>Historial de Confirmaciones en Vivo ({alerts.length})</h3>
+              <span className="live-pulse-badge">● Escuchando en tiempo real</span>
+            </div>
+
+            {alerts.length === 0 ? (
+              <div className="empty-alerts-box">
+                <Sparkles size={32} />
+                <p>
+                  Aún no hay confirmaciones registradas. Cuando un invitado confirme o modifique su asistencia, aparecerá aquí al instante y sonará la campana.
+                </p>
+              </div>
+            ) : (
+              <div className="alerts-list">
+                {alerts.map((al) => {
+                  const isUnread = !al.read;
+                  return (
+                    <article
+                      key={al.id}
+                      className={`alert-card ${isUnread ? 'is-unread' : ''}`}
+                    >
+                      <div className="alert-card-top">
+                        <div className="alert-title-row">
+                          {isUnread && (
+                            <span className="alert-unread-dot" title="No leída" />
+                          )}
+                          <h4>{al.displayTitle}</h4>
+                          <span className={`scope-badge is-${al.eventScope}`}>
+                            {al.eventScope === 'party_only'
+                              ? '🎂 Solo Cumpleaños'
+                              : '🕊️ Bautizo + Cumpleaños'}
+                          </span>
+                        </div>
+                        <span className="alert-timestamp">
+                          <Clock size={12} />{' '}
+                          {new Date(al.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <p className="alert-summary-text">{al.summary}</p>
+
+                      {al.details && (
+                        <div className="alert-details-tags">
+                          {al.details.attending.length > 0 && (
+                            <span className="alert-tag-attending">
+                              ✓ Asisten: {al.details.attending.join(', ')}
+                            </span>
+                          )}
+                          {al.details.declined.length > 0 && (
+                            <span className="alert-tag-declined">
+                              ✕ No asisten: {al.details.declined.join(', ')}
+                            </span>
+                          )}
+                          {al.details.plusOnes.length > 0 && (
+                            <span className="alert-tag-plus">
+                              + Acompañantes: {al.details.plusOnes.join(', ')}
+                            </span>
+                          )}
+                          {al.details.notes && (
+                            <p className="alert-guest-note">
+                              💬 <em>"{al.details.notes}"</em>
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="alert-card-actions">
+                        <button
+                          type="button"
+                          className="btn-forward-wa"
+                          onClick={() => handleForwardAlertWhatsApp('mom', al)}
+                          title="Enviar aviso al WhatsApp de Mamá"
+                        >
+                          <Send size={13} />
+                          <span>Avisar a Mamá</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="btn-forward-wa"
+                          onClick={() => handleForwardAlertWhatsApp('dad', al)}
+                          title="Enviar aviso al WhatsApp de Papá"
+                        >
+                          <Send size={13} />
+                          <span>Avisar a Papá</span>
+                        </button>
+
+                        {isUnread && (
+                          <button
+                            type="button"
+                            className="btn-mark-read"
+                            onClick={() => handleMarkAlertRead(al.id)}
+                            title="Marcar como leída"
+                          >
+                            <Check size={14} />
+                            <span>Leída</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          className="btn-delete-alert"
+                          onClick={() => handleDeleteAlert(al.id)}
+                          title="Eliminar registro de alerta"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ============================================================ */}
       {/* ==================== TAB 2: MESAS Y ASIENTOS ================ */}
       {/* ============================================================ */}
       {activeTab === 'tables' && (
@@ -2118,6 +2761,52 @@ export const DashboardPage: React.FC = () => {
                 />
               </div>
 
+              {/* Selector de Tipo de Evento / Horario */}
+              <div className="form-group">
+                <label>
+                  <Calendar size={14} /> Tipo de Invitación / Evento al que asiste
+                </label>
+                <div className="scope-selection-grid">
+                  <label
+                    className={`scope-select-box ${
+                      invEventScope === 'full' ? 'is-selected' : ''
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="invScope"
+                      checked={invEventScope === 'full'}
+                      onChange={() => setInvEventScope('full')}
+                    />
+                    <div>
+                      <strong>🕊️ Almuerzo de Bautizo + Fiesta de Cumpleaños</strong>
+                      <p>
+                        Inicia a las 11:30 AM con el bautizo/almuerzo y continúa con el cumpleaños a las 2:30 PM.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`scope-select-box ${
+                      invEventScope === 'party_only' ? 'is-selected' : ''
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="invScope"
+                      checked={invEventScope === 'party_only'}
+                      onChange={() => setInvEventScope('party_only')}
+                    />
+                    <div>
+                      <strong>🎂 Solo Fiesta de Cumpleaños</strong>
+                      <p>
+                        Inicia a las 2:30 PM. Oculta el bautizo y almuerzo de las 11:30 AM en la tarjeta del invitado.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div className="form-row-2">
                 <div className="form-group">
                   <label>
@@ -2304,6 +2993,12 @@ export const DashboardPage: React.FC = () => {
                           ) : (
                             <span className="badge-individual">Individual</span>
                           )}
+
+                          <span className={`scope-badge is-${inv.eventScope || 'full'}`}>
+                            {inv.eventScope === 'party_only'
+                              ? '🎂 Solo Cumpleaños'
+                              : '🕊️ Bautizo + Cumple'}
+                          </span>
 
                           <span className="badge-plus">
                             {inv.maxPlusOnes > 0
@@ -2612,6 +3307,35 @@ export const DashboardPage: React.FC = () => {
             </form>
           </section>
         </div>
+      )}
+
+      {/* Floating Toast Notification when a guest confirms in real-time */}
+      {activeToast && (
+        <aside
+          className="floating-realtime-toast"
+          role="alert"
+          onClick={() => setActiveTab('alerts')}
+        >
+          <div className="toast-icon">
+            <Bell size={20} />
+          </div>
+          <div className="toast-body">
+            <strong>🌟 ¡Nueva confirmación recibida!</strong>
+            <p>{activeToast.summary}</p>
+            <small>Toca para abrir el panel de alertas</small>
+          </div>
+          <button
+            type="button"
+            className="toast-close-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveToast(null);
+            }}
+            title="Cerrar aviso"
+          >
+            <X size={15} />
+          </button>
+        </aside>
       )}
     </div>
   );

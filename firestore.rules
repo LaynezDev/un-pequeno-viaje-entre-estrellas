@@ -20,5 +20,10 @@ service cloud.firestore {
     match /tables/{tableId} {
       allow read, write: if true;
     }
+
+    // Alertas y notificaciones de confirmación en tiempo real para los papás
+    match /alerts/{alertId} {
+      allow read, write: if true;
+    }
   }
 }

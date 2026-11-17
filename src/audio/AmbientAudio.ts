@@ -114,6 +114,38 @@ class AmbientSoundEngine {
     osc.stop(now + duration);
     overtone.stop(now + duration);
   }
+
+  /**
+   * Plays a crisp, gentle star bell chime for new RSVP notifications
+   * Works independently of background music toggle
+   */
+  public playNotificationChime(): void {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      if (!this.ctx) {
+        this.ctx = new AudioCtx();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 0.22;
+        this.masterGain.connect(this.ctx.destination);
+      }
+      if (this.ctx.state === 'suspended') {
+        void this.ctx.resume();
+      }
+
+      // Three harmonic celesta bells: G5 (783.99), C6 (1046.50), E6 (1318.51)
+      const chimeNotes = [783.99, 1046.5, 1318.51];
+      chimeNotes.forEach((freq, idx) => {
+        setTimeout(() => {
+          this.playCelestaNote(freq, 1.8);
+        }, idx * 110);
+      });
+    } catch (e) {
+      console.warn('AudioContext chime blocked by autoplay policy:', e);
+    }
+  }
 }
 
 export const ambientAudio = new AmbientSoundEngine();
